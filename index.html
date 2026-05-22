@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FinalWhistle AI | GenLayer Football Predictions</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Main navigation">
+        <div class="brand">
+          <div class="brand-mark" aria-label="FinalWhistle sport crest">
+            <svg class="sport-logo" viewBox="0 0 72 72" role="img" aria-hidden="true">
+              <defs>
+                <linearGradient id="crestGlow" x1="10" x2="62" y1="8" y2="66" gradientUnits="userSpaceOnUse">
+                  <stop stop-color="#63f7a9" />
+                  <stop offset=".5" stop-color="#4cb8ff" />
+                  <stop offset="1" stop-color="#f6c85f" />
+                </linearGradient>
+              </defs>
+              <path class="fw-wing left" d="M9 27l15-9-5 14L8 38z"></path>
+              <path class="fw-wing right" d="M63 27l-15-9 5 14 11 6z"></path>
+              <path class="fw-shield" d="M36 6l24 9v20c0 15-8 24-24 31C20 59 12 50 12 35V15l24-9z"></path>
+              <path class="fw-field" d="M22 23h28M19 35h34M25 48h22"></path>
+              <circle class="fw-ball" cx="36" cy="36" r="12"></circle>
+              <path class="fw-star" d="M36 20l3 7 8 1-6 5 2 8-7-4-7 4 2-8-6-5 8-1 3-7z"></path>
+              <path class="fw-monogram" d="M27 49V33h15m-15 8h11m6-8l3 16 5-12 5 12 3-16"></path>
+            </svg>
+          </div>
+          <div>
+            <strong>FinalWhistle</strong>
+            <span>GenLayer AI</span>
+          </div>
+        </div>
+
+        <nav class="nav-list" aria-label="Dashboard sections">
+          <a class="nav-item active" href="#predictions">Live</a>
+          <a class="nav-item" href="#resolver">Resolver</a>
+          <a class="nav-item" href="#signals">Signals</a>
+          <a class="nav-item" href="#markets">Markets</a>
+        </nav>
+
+        <div class="network-card">
+          <span class="status-dot"></span>
+          <div>
+            <strong>GenLayer testnet</strong>
+            <span>AI consensus online</span>
+          </div>
+        </div>
+      </aside>
+
+      <main>
+        <section class="topbar" aria-label="Live status">
+          <div>
+            <p class="eyebrow">AI football prediction desk</p>
+            <h1>Live match probabilities, resolved by GenLayer intelligence.</h1>
+          </div>
+          <div class="top-actions">
+            <button class="wallet-button" id="connect-wallet">Connect Wallet</button>
+            <div class="clock-panel">
+              <span id="clock">--:--:--</span>
+              <small id="wallet-status">Wallet not connected</small>
+            </div>
+          </div>
+        </section>
+
+        <section class="hero-grid" id="predictions">
+          <article class="featured-match" aria-labelledby="featured-title">
+            <div class="match-header">
+              <div>
+                <p class="league" id="featured-league">Premier League</p>
+                <h2 id="featured-title">Arsenal vs Manchester City</h2>
+              </div>
+              <span class="live-pill" id="featured-status">Live 68'</span>
+            </div>
+
+            <div class="scoreboard">
+              <div class="team">
+                <span class="crest arsenal" aria-label="Arsenal club logo">
+                  <img
+                    id="home-logo"
+                    src="https://upload.wikimedia.org/wikipedia/en/5/53/Arsenal_FC.svg"
+                    alt="Arsenal FC logo"
+                  />
+                </span>
+                <strong id="home-team-name">Arsenal</strong>
+                <b id="home-score">2</b>
+              </div>
+              <div class="versus">
+                <span>Prediction</span>
+                <strong id="featured-confidence">64%</strong>
+              </div>
+              <div class="team right">
+                <span class="crest city" aria-label="Manchester City club logo">
+                  <img
+                    id="away-logo"
+                    src="https://upload.wikimedia.org/wikipedia/en/e/eb/Manchester_City_FC_badge.svg"
+                    alt="Manchester City FC logo"
+                  />
+                </span>
+                <strong id="away-team-name">Man City</strong>
+                <b id="away-score">1</b>
+              </div>
+            </div>
+
+            <div class="probability-bars" aria-label="Win probability">
+              <div>
+                <span>Home</span>
+                <div class="bar"><i id="home-bar"></i></div>
+                <strong id="home-prob">64%</strong>
+              </div>
+              <div>
+                <span>Draw</span>
+                <div class="bar"><i id="draw-bar"></i></div>
+                <strong id="draw-prob">22%</strong>
+              </div>
+              <div>
+                <span>Away</span>
+                <div class="bar"><i id="away-bar"></i></div>
+                <strong id="away-prob">14%</strong>
+              </div>
+            </div>
+
+            <div class="insight-strip">
+              <div>
+                <span>AI read</span>
+                <strong id="ai-read">Arsenal pressure is rising after two high-quality chances.</strong>
+              </div>
+              <button class="icon-button" id="refresh-featured" aria-label="Refresh prediction" title="Refresh prediction">
+                R
+              </button>
+            </div>
+          </article>
+
+          <article class="bet-slip" id="resolver" aria-labelledby="resolver-title">
+            <div class="section-heading">
+              <p class="eyebrow">Bet resolver</p>
+              <h2 id="resolver-title">Create a natural-language football bet</h2>
+            </div>
+
+            <div class="contract-status">
+              <div>
+                <span>Network</span>
+                <strong id="network-label">GenLayer localnet</strong>
+              </div>
+              <div>
+                <span>Contract</span>
+                <strong id="contract-label">Loading</strong>
+              </div>
+            </div>
+
+            <div class="label-row">
+              <label for="bet-condition">Condition</label>
+              <button class="text-button" id="reset-condition" type="button">Use selected match</button>
+            </div>
+            <textarea id="bet-condition" rows="3">Arsenal will beat Manchester City by full time.</textarea>
+
+            <div class="form-row">
+              <label>
+                Stake
+                <input id="stake" type="number" value="25" min="1" />
+              </label>
+              <label>
+                Asset
+                <select id="asset">
+                  <option>USDC</option>
+                  <option>ETH</option>
+                  <option>GEN</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="form-row">
+              <label>
+                Match date
+                <input id="match-date" type="date" value="2026-05-09" />
+              </label>
+              <label>
+                RPC target
+                <select id="rpc-target">
+                  <option value="localnet">Localnet</option>
+                  <option value="studionet" selected>GenLayer Studio</option>
+                  <option value="testnetBradbury">Testnet Bradbury</option>
+                </select>
+              </label>
+            </div>
+
+            <label for="manual-wallet">Manual wallet address fallback</label>
+            <input id="manual-wallet" type="text" placeholder="0x... if this browser has no wallet extension" />
+
+            <div class="action-row">
+              <button class="primary-button" id="submit-bet">Submit Bet</button>
+              <button class="secondary-button" id="simulate-resolve">Resolve</button>
+            </div>
+
+            <div class="resolver-output" id="resolver-output">
+              <span>Awaiting contract prompt</span>
+              <strong>Connect a wallet, select a match, then submit or resolve the bet.</strong>
+            </div>
+          </article>
+        </section>
+
+        <section class="content-grid">
+          <article class="panel" id="signals">
+            <div class="section-heading">
+              <p class="eyebrow">AI signals</p>
+              <h2>Model factors</h2>
+            </div>
+            <div class="signal-list" id="signal-list"></div>
+          </article>
+
+          <article class="panel wide" id="markets">
+            <div class="section-heading row-heading">
+              <div>
+                <p class="eyebrow">Open matches</p>
+                <h2>Prediction markets</h2>
+              </div>
+              <div class="market-tools">
+                <span id="feed-status">Loading today's football matches...</span>
+                <button class="secondary-button compact-button" id="refresh-live-matches">Refresh Live</button>
+              </div>
+            </div>
+            <div class="market-list" id="market-list"></div>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

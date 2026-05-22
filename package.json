@@ -1,0 +1,18 @@
+{
+  "name": "finalwhistle-ai",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 4174",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 4174",
+    "start": "node server.js",
+    "check": "node --check app.js"
+  },
+  "dependencies": {
+    "@vitejs/plugin-basic-ssl": "latest",
+    "genlayer-js": "latest",
+    "vite": "latest"
+  }
+}

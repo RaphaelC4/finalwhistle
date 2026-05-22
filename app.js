@@ -1,0 +1,793 @@
+// ─── GenLayer SDK ────────────────────────────────────────────────────────────
+import { createClient, createAccount } from "genlayer-js";
+import { localnet, studionet, testnetAsimov } from "genlayer-js/chains";
+import { TransactionStatus } from "genlayer-js/types";
+// NOTE: only these three imports — do not add any more genlayer imports below
+
+// ─── Fallback match data ──────────────────────────────────────────────────────
+const fallbackMatches = [
+  {
+    title: "Arsenal vs Manchester City",
+    league: "Premier League",
+    meta: "Live 68' - Emirates Stadium",
+    status: "Live 68'",
+    homeTeam: "Arsenal",
+    awayTeam: "Manchester City",
+    homeScore: 2,
+    awayScore: 1,
+    homeLogo: "https://upload.wikimedia.org/wikipedia/en/5/53/Arsenal_FC.svg",
+    awayLogo: "https://upload.wikimedia.org/wikipedia/en/e/eb/Manchester_City_FC_badge.svg",
+    home: 64,
+    draw: 22,
+    away: 14,
+    odds: ["ARS 1.74", "Draw 4.20", "MCI 5.60"],
+  },
+  {
+    title: "Barcelona vs Real Madrid",
+    league: "La Liga",
+    meta: "Today - 20:00",
+    status: "Scheduled",
+    homeTeam: "Barcelona",
+    awayTeam: "Real Madrid",
+    homeScore: "-",
+    awayScore: "-",
+    home: 38,
+    draw: 29,
+    away: 33,
+    odds: ["BAR 2.42", "Draw 3.45", "RMA 2.84"],
+  },
+  {
+    title: "Bayern Munich vs Dortmund",
+    league: "Bundesliga",
+    meta: "Today - 18:30",
+    status: "Scheduled",
+    homeTeam: "Bayern Munich",
+    awayTeam: "Dortmund",
+    homeScore: "-",
+    awayScore: "-",
+    home: 57,
+    draw: 24,
+    away: 19,
+    odds: ["BAY 1.92", "Draw 3.90", "BVB 4.10"],
+  },
+  {
+    title: "Inter Milan vs Juventus",
+    league: "Serie A",
+    meta: "Tomorrow - 19:45",
+    status: "Scheduled",
+    homeTeam: "Inter Milan",
+    awayTeam: "Juventus",
+    homeScore: "-",
+    awayScore: "-",
+    home: 44,
+    draw: 31,
+    away: 25,
+    odds: ["INT 2.18", "Draw 3.20", "JUV 3.30"],
+  },
+];
+
+// Start with fallback so market list is never empty on first render
+let matches = [...fallbackMatches];
+
+const fallbackMatchesUnavailable = [
+  {
+    title: "Live feed unavailable",
+    league: "Football",
+    meta: "Check API/network and refresh",
+    status: "Offline",
+    homeTeam: "Live",
+    awayTeam: "Feed",
+    homeScore: "-",
+    awayScore: "-",
+    homeLogo: "",
+    awayLogo: "",
+    home: 34,
+    draw: 33,
+    away: 33,
+    odds: ["Home 34%", "Draw 33%", "Away 33%"],
+  },
+];
+
+const prestigeTerms = [
+  "premier league", "champions league", "europa league", "la liga",
+  "serie a", "bundesliga", "ligue 1", "fa cup", "carabao cup",
+  "arsenal", "chelsea", "liverpool", "manchester united", "man united",
+  "manchester city", "man city", "tottenham", "newcastle", "real madrid",
+  "barcelona", "atletico", "bayern", "dortmund", "leverkusen",
+  "psg", "marseille", "inter", "milan", "juventus", "napoli", "roma",
+  "ajax", "psv", "benfica", "porto", "sporting", "celtic", "rangers",
+  "sevilla", "espanyol", "almeria",
+];
+
+const signals = [
+  ["Shot quality", "Home xG trend has improved across the last 12 minutes.", "+18%"],
+  ["Momentum", "Possession is stable, but final-third entries favor Arsenal.", "+11%"],
+  ["Risk", "One yellow card creates defensive substitution pressure.", "-6%"],
+  ["Market drift", "Public price moved slower than the AI probability update.", "+9%"],
+];
+
+const reads = [
+  "Arsenal pressure is rising after two high-quality chances.",
+  "City's passing tempo dropped, increasing draw protection.",
+  "The model sees late goal risk from both benches.",
+  "Validator consensus favors the home win, but confidence is not final.",
+];
+
+// ─── GenLayer chain map ───────────────────────────────────────────────────────
+const chainMap = {
+  localnet: localnet,
+  studionet: studionet,
+  testnetBradbury: testnetAsimov, // testnetAsimov is the correct export; Bradbury is the alias
+};
+
+const networkLabels = {
+  localnet: "GenLayer localnet",
+  studionet: "GenLayer studionet",
+  testnetBradbury: "GenLayer testnet Bradbury",
+};
+
+// ─── App state ────────────────────────────────────────────────────────────────
+const appState = {
+  wallet: "",
+  lastTx: "",
+  liveFeed: "fallback",
+  conditionTouched: false,
+  hasContract: false,
+  contractAddress: "",
+};
+
+// ─── Utilities ────────────────────────────────────────────────────────────────
+const $ = (selector) => document.querySelector(selector);
+
+function shortAddress(address) {
+  if (!address) return "";
+  return `${address.slice(0, 6)}...${address.slice(-4)}`;
+}
+
+function demoTxId(prefix) {
+  const random = Math.random().toString(16).slice(2, 10);
+  return `${prefix}_${Date.now().toString(16)}${random}`;
+}
+
+function updateContractLabels() {
+  const network = $("#rpc-target").value;
+  $("#network-label").textContent = networkLabels[network] || network;
+  $("#contract-label").textContent = appState.hasContract ? "Configured" : "Demo mode";
+}
+
+async function loadPublicConfig() {
+  try {
+    const response = await fetch("/api/config", { cache: "no-store" });
+    if (!response.ok) throw new Error("Config unavailable");
+    const config = await response.json();
+    appState.hasContract = Boolean(config.hasContract);
+    if (config.defaultNetwork && $("#rpc-target")) {
+      $("#rpc-target").value = config.defaultNetwork;
+    }
+  } catch {
+    appState.hasContract = false;
+  }
+  updateContractLabels();
+}
+
+async function getConfiguredContractAddress() {
+  if (appState.contractAddress) return appState.contractAddress;
+  const response = await fetch("/api/contract-address", { cache: "no-store" });
+  if (!response.ok) throw new Error("Contract is not configured on the server.");
+  const { address } = await response.json();
+  appState.contractAddress = address;
+  return address;
+}
+
+function setWalletConnected(address, source = "Wallet") {
+  appState.wallet = address;
+  $("#connect-wallet").classList.add("connected");
+  $("#connect-wallet").textContent = shortAddress(appState.wallet);
+  $("#wallet-status").textContent = `${source} ${shortAddress(appState.wallet)}`;
+}
+
+function updateClock() {
+  $("#clock").textContent = new Date().toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function setBar(id, value) {
+  $(id).style.width = `${value}%`;
+}
+
+function jitter(value, amount = 5) {
+  const change = Math.round((Math.random() * amount * 2 - amount) * 10) / 10;
+  return Math.max(4, Math.min(88, value + change));
+}
+
+function todayISO() {
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function buildSourceUrl(match) {
+  if (match.fixtureId) {
+    return `https://www.api-football.com/documentation-v3#tag/Fixtures/operation/get-fixtures?fixture=${match.fixtureId}`;
+  }
+  return match.sourceUrl || "https://www.api-football.com/";
+}
+
+function findValue(object, keys) {
+  for (const key of keys) {
+    if (object && object[key] !== undefined && object[key] !== null && object[key] !== "") {
+      return object[key];
+    }
+  }
+  return "";
+}
+
+function makeBadge(teamName) {
+  const initials =
+    teamName
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((word) => word[0])
+      .join("")
+      .toUpperCase() || "FC";
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80">
+      <circle cx="40" cy="40" r="36" fill="#eef8f1"/>
+      <circle cx="40" cy="40" r="30" fill="#123f33"/>
+      <text x="40" y="47" text-anchor="middle" font-family="Arial" font-size="22" font-weight="800" fill="#51e08b">${initials}</text>
+    </svg>
+  `;
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
+function inferProbability(match, index) {
+  const homeScore = Number(match.homeScore);
+  const awayScore = Number(match.awayScore);
+  const hasScore = Number.isFinite(homeScore) && Number.isFinite(awayScore);
+  if (hasScore && homeScore !== awayScore) {
+    const leaderHome = homeScore > awayScore;
+    return { home: leaderHome ? 62 : 18, draw: 22, away: leaderHome ? 16 : 60 };
+  }
+  const seed = (match.title.length + index * 13) % 18;
+  return { home: 42 + seed, draw: 25, away: 33 - Math.min(seed, 12) };
+}
+
+function normalizeSportSrcMatch(raw, index) {
+  const homeTeam =
+    raw.teams?.home?.name ||
+    findValue(raw, ["home", "homeTeam", "team_home", "home_name", "team1", "strHomeTeam"]) ||
+    "Home";
+  const awayTeam =
+    raw.teams?.away?.name ||
+    findValue(raw, ["away", "awayTeam", "team_away", "away_name", "team2", "strAwayTeam"]) ||
+    "Away";
+  const league = findValue(raw, ["league", "competition", "tournament", "strLeague"]) || "Football";
+  const timestamp = findValue(raw, ["timestamp", "time", "date", "start_time", "event_time", "strTimestamp"]);
+  const kickoffDate = Number(timestamp) ? new Date(Number(timestamp)) : null;
+  const kickoff = kickoffDate
+    ? kickoffDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : timestamp;
+  const rawStatus = findValue(raw, ["status", "match_status", "state", "time_status", "live_status"]);
+  const status = rawStatus || (kickoffDate && kickoffDate <= new Date() ? "Live/Started" : "Upcoming");
+  const homeScore = findValue(raw, ["home_score", "score_home", "homeScore", "intHomeScore"]) || "-";
+  const awayScore = findValue(raw, ["away_score", "score_away", "awayScore", "intAwayScore"]) || "-";
+  const homeLogo =
+    raw.teams?.home?.badge ||
+    findValue(raw, ["home_badge", "home_logo", "homeLogo", "strHomeTeamBadge"]) ||
+    makeBadge(homeTeam);
+  const awayLogo =
+    raw.teams?.away?.badge ||
+    findValue(raw, ["away_badge", "away_logo", "awayLogo", "strAwayTeamBadge"]) ||
+    makeBadge(awayTeam);
+  const match = {
+    title: raw.title || `${homeTeam} vs ${awayTeam}`,
+    league,
+    meta: `${status}${kickoff ? ` - ${kickoff}` : ""}`,
+    status,
+    sourceUrl:
+      raw.url ||
+      raw.sourceUrl ||
+      `https://sportsrc.org/event/${raw.id || encodeURIComponent(raw.title || "")}`,
+    kickoffTime: kickoffDate ? kickoffDate.getTime() : 0,
+    homeTeam,
+    awayTeam,
+    homeScore,
+    awayScore,
+    homeLogo,
+    awayLogo,
+    odds: [],
+  };
+  const probability = inferProbability(match, index);
+  return {
+    ...match,
+    ...probability,
+    odds: [`Home ${probability.home}%`, `Draw ${probability.draw}%`, `Away ${probability.away}%`],
+  };
+}
+
+function normalizeApiFootballMatch(raw, index) {
+  const elapsed = raw.fixture?.status?.elapsed;
+  const statusShort = raw.fixture?.status?.short || "NS";
+  const statusLong = raw.fixture?.status?.long || "Scheduled";
+  const date = raw.fixture?.date ? new Date(raw.fixture.date) : null;
+  const isLive = ["1H", "HT", "2H", "ET", "BT", "P", "LIVE"].includes(statusShort);
+  const homeScore = raw.goals?.home ?? "-";
+  const awayScore = raw.goals?.away ?? "-";
+  const match = {
+    fixtureId: raw.fixture?.id,
+    title: `${raw.teams?.home?.name || "Home"} vs ${raw.teams?.away?.name || "Away"}`,
+    league: raw.league?.name || "Football",
+    meta: `${statusLong}${date ? ` - ${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""}`,
+    status: isLive && elapsed ? `Live ${elapsed}'` : statusLong,
+    sourceUrl: `https://v3.football.api-sports.io/fixtures?id=${raw.fixture?.id || ""}`,
+    kickoffTime: date ? date.getTime() : 0,
+    homeTeam: raw.teams?.home?.name || "Home",
+    awayTeam: raw.teams?.away?.name || "Away",
+    homeScore,
+    awayScore,
+    homeLogo: raw.teams?.home?.logo || makeBadge(raw.teams?.home?.name || "Home"),
+    awayLogo: raw.teams?.away?.logo || makeBadge(raw.teams?.away?.name || "Away"),
+    odds: [],
+  };
+  const probability = inferProbability(match, index);
+  return {
+    ...match,
+    ...probability,
+    odds: [`Home ${probability.home}%`, `Draw ${probability.draw}%`, `Away ${probability.away}%`],
+  };
+}
+
+function prestigeScore(match) {
+  const haystack = `${match.title} ${match.league} ${match.homeTeam} ${match.awayTeam}`.toLowerCase();
+  return prestigeTerms.reduce((score, term) => score + (haystack.includes(term) ? 1 : 0), 0);
+}
+
+function buildEliteMatchList(liveMatches) {
+  const elite = liveMatches
+    .map((match) => ({ ...match, prestige: prestigeScore(match) }))
+    .filter((match) => match.prestige > 0)
+    .sort((a, b) => b.prestige - a.prestige || a.title.localeCompare(b.title));
+  const broadLive = liveMatches
+    .filter((match) => !elite.some((item) => item.title === match.title))
+    .sort((a, b) => (a.kickoffTime || 0) - (b.kickoffTime || 0));
+  return [...elite, ...broadLive].slice(0, 12);
+}
+
+function setImage(selector, src, alt) {
+  const image = $(selector);
+  if (!image) return;
+  image.src = src || makeBadge(alt);
+  image.alt = alt;
+}
+
+function setFeaturedMatch(match) {
+  $("#featured-league").textContent = match.league;
+  $("#featured-title").textContent = match.title;
+  $("#featured-status").textContent = match.status || "Today";
+  $("#home-team-name").textContent = match.homeTeam;
+  $("#away-team-name").textContent = match.awayTeam;
+  $("#home-score").textContent = match.homeScore ?? "-";
+  $("#away-score").textContent = match.awayScore ?? "-";
+  setImage("#home-logo", match.homeLogo, `${match.homeTeam} logo`);
+  setImage("#away-logo", match.awayLogo, `${match.awayTeam} logo`);
+  if (!appState.conditionTouched) {
+    setConditionFromMatch(match);
+  }
+  $("#match-date").value = todayISO();
+}
+
+function setConditionFromMatch(match = matches[0] || fallbackMatches[0]) {
+  $("#bet-condition").value = `${match.homeTeam} will beat ${match.awayTeam} by full time.`;
+  appState.conditionTouched = false;
+}
+
+function refreshFeatured() {
+  const base = matches[0] || fallbackMatches[0];
+  setFeaturedMatch(base);
+  const home = Math.round(jitter(base.home, 7));
+  const draw = Math.round(jitter(base.draw, 4));
+  const away = Math.max(4, 100 - home - draw);
+  $("#home-prob").textContent = `${home}%`;
+  $("#draw-prob").textContent = `${draw}%`;
+  $("#away-prob").textContent = `${away}%`;
+  $("#featured-confidence").textContent = `${home}%`;
+  $("#ai-read").textContent = reads[Math.floor(Math.random() * reads.length)];
+  setBar("#home-bar", home);
+  setBar("#draw-bar", draw);
+  setBar("#away-bar", away);
+}
+
+function renderSignals() {
+  $("#signal-list").innerHTML = signals
+    .map(
+      ([title, copy, score]) => `
+        <div class="signal-item">
+          <div>
+            <strong>${title}</strong>
+            <span>${copy}</span>
+          </div>
+          <div class="signal-score">${score}</div>
+        </div>
+      `
+    )
+    .join("");
+}
+
+function renderMarkets() {
+  $("#market-list").innerHTML = matches
+    .map(
+      (match, index) => `
+        <div class="market-row">
+          <div>
+            <span class="market-title">
+              <span class="market-team">
+                ${match.homeLogo ? `<img class="market-logo" src="${match.homeLogo}" alt="${match.homeTeam} logo" />` : ""}
+                ${match.title}
+                ${match.awayLogo ? `<img class="market-logo" src="${match.awayLogo}" alt="${match.awayTeam} logo" />` : ""}
+              </span>
+            </span>
+            <span class="market-meta">${match.league} - ${match.meta}</span>
+          </div>
+          <div class="market-odds" aria-label="${match.title} probabilities">
+            ${match.odds.map((odd) => `<span class="odd">${odd}</span>`).join("")}
+          </div>
+          <button class="secondary-button compact-button select-market" data-index="${index}">Use Match</button>
+        </div>
+      `
+    )
+    .join("");
+
+  document.querySelectorAll(".select-market").forEach((button) => {
+    button.addEventListener("click", () => {
+        const match = matches[Number(button.dataset.index)];
+        if (match) {
+          matches = [match, ...matches.filter((item) => item.title !== match.title)];
+          setConditionFromMatch(match);
+          renderMarkets();
+          refreshFeatured();
+          $("#resolver").scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    });
+  });
+}
+
+// ─── Live match feeds ─────────────────────────────────────────────────────────
+async function loadLiveMatches() {
+  const status = $("#feed-status");
+  status.textContent = "Loading today's football matches...";
+  try {
+    await loadApiFootballMatches();
+  } catch (error) {
+    try {
+      await loadSportSrcMatches();
+    } catch {
+      matches = [...fallbackMatchesUnavailable];
+      appState.liveFeed = "fallback";
+      renderMarkets();
+      refreshFeatured();
+      status.textContent = "Live feed unavailable - check server/API configuration";
+    }
+  }
+}
+
+async function loadApiFootballMatches() {
+  const status = $("#feed-status");
+  const date = todayISO();
+  const response = await fetch(`/api/fixtures?date=${date}&timezone=Africa/Lagos`, { cache: "no-store" });
+  if (!response.ok) throw new Error(`API-Football returned ${response.status}`);
+  const data = await response.json();
+  if (data.errors && Object.keys(data.errors).length) throw new Error(JSON.stringify(data.errors));
+  const normalized = (data.response || []).map(normalizeApiFootballMatch);
+  if (!normalized.length) throw new Error("API-Football returned no fixtures today");
+  matches = buildEliteMatchList(normalized);
+  appState.liveFeed = "api-football";
+  renderMarkets();
+  refreshFeatured();
+  const eliteCount = matches.filter((m) => prestigeScore(m) > 0).length;
+  status.textContent = `API-Football live: ${matches.length} matches today, ${eliteCount} elite`;
+}
+
+async function loadSportSrcMatches() {
+  const status = $("#feed-status");
+  const response = await fetch("https://api.sportsrc.org/?data=matches&category=football", {
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error(`Feed returned ${response.status}`);
+  const data = await response.json();
+  const list = Array.isArray(data) ? data : data.data || data.matches || data.events || [];
+  const normalized = list
+    .slice(0, 12)
+    .map(normalizeSportSrcMatch)
+    .filter((m) => m.homeTeam && m.awayTeam);
+  const today = todayISO();
+  const todayMatches = normalized.filter((match) => {
+    if (!match.kickoffTime) return true;
+    return new Date(match.kickoffTime).toISOString().slice(0, 10) === today;
+  });
+  if (!todayMatches.length) throw new Error("No matches returned for today");
+  matches = buildEliteMatchList(todayMatches);
+  appState.liveFeed = "sportsrc";
+  renderMarkets();
+  refreshFeatured();
+  const eliteCount = todayMatches.filter((m) => prestigeScore(m) > 0).length;
+  status.textContent =
+    eliteCount > 0
+      ? `SportSRC fallback: ${matches.length} matches today, ${eliteCount} elite`
+      : `SportSRC fallback: ${matches.length} real football matches today`;
+}
+
+// ─── GenLayer SDK helpers ─────────────────────────────────────────────────────
+
+/**
+ * Build a GenLayer client using the current UI settings.
+ *
+ * Priority for the signer:
+ *  1. Connected injected wallet (MetaMask) address — MetaMask handles signing
+ *  2. Manual wallet address field — same passthrough approach
+ *  3. Ephemeral createAccount() — fine for read-only / local dev
+ */
+function buildGenLayerClient() {
+  const networkKey = $("#rpc-target").value;
+  const chain = chainMap[networkKey] || studionet;
+  const manualWallet = $("#manual-wallet")?.value.trim();
+  const signerAddress = appState.wallet || manualWallet || null;
+
+  if (signerAddress) {
+    // Pass address string → MetaMask (or other injected wallet) handles signing
+    return createClient({ chain, account: signerAddress });
+  }
+
+  // Local dev fallback: ephemeral account (no real signing power)
+  const account = createAccount();
+  return createClient({ chain, account });
+}
+
+/** Read the on-chain market state from a deployed FinalWhistleResolver. */
+async function readContractMarket(contractAddress) {
+  const client = buildGenLayerClient();
+  return client.readContract({
+    address: contractAddress,
+    functionName: "get_market",
+    args: [],
+  });
+}
+
+/** Write: call update_market() to update bet condition on-chain. */
+async function writeContractUpdateMarket(contractAddress, match, condition) {
+  const client = buildGenLayerClient();
+  const txHash = await client.writeContract({
+    address: contractAddress,
+    functionName: "update_market",
+    args: [todayISO(), match.homeTeam, match.awayTeam, condition, buildSourceUrl(match)],
+    value: 0n,
+  });
+  const receipt = await client.waitForTransactionReceipt({
+    hash: txHash,
+    status: TransactionStatus.ACCEPTED,
+    retries: 40,
+    interval: 4000,
+  });
+  return { txHash, receipt };
+}
+
+/** Write: call resolve() to trigger AI validator resolution. */
+async function writeContractResolve(contractAddress) {
+  const client = buildGenLayerClient();
+  const txHash = await client.writeContract({
+    address: contractAddress,
+    functionName: "resolve",
+    args: [],
+    value: 0n,
+  });
+  const receipt = await client.waitForTransactionReceipt({
+    hash: txHash,
+    status: TransactionStatus.FINALIZED,
+    retries: 80,
+    interval: 6000,
+  });
+  return { txHash, receipt };
+}
+
+// ─── Wallet ───────────────────────────────────────────────────────────────────
+async function connectWallet() {
+  const manualWallet = $("#manual-wallet")?.value.trim();
+  if (manualWallet) {
+    setWalletConnected(manualWallet, "Manual wallet");
+    $("#resolver-output").innerHTML = `
+      <span>Manual wallet mode</span>
+      <strong>Using ${shortAddress(manualWallet)} for local GenLayer testing.</strong>
+    `;
+    return;
+  }
+
+  if (!window.ethereum) {
+    $("#resolver-output").innerHTML = `
+      <span>Wallet required</span>
+      <strong>No injected wallet was found.</strong>
+      <p>Use Chrome/Brave with MetaMask, or paste a manual wallet address.</p>
+    `;
+    return;
+  }
+
+  try {
+    $("#connect-wallet").textContent = "Connecting...";
+    const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+    if (!accounts[0]) throw new Error("No account returned");
+    setWalletConnected(accounts[0], "Connected");
+  } catch (error) {
+    $("#connect-wallet").textContent = "Connect Wallet";
+    $("#resolver-output").innerHTML = `
+      <span>Wallet connection failed</span>
+      <strong>${error.message || "The wallet rejected or did not complete the request."}</strong>
+      <p>Unlock your wallet and try again.</p>
+    `;
+  }
+}
+
+// ─── Submit bet ───────────────────────────────────────────────────────────────
+async function submitBet() {
+  const condition = $("#bet-condition").value.trim();
+  const stake = $("#stake").value;
+  const asset = $("#asset").value;
+
+  if (!appState.wallet) {
+    await connectWallet();
+    if (!appState.wallet) return;
+  }
+
+  if (!condition) {
+    $("#resolver-output").innerHTML = `
+      <span>Missing condition</span>
+      <strong>Add the natural-language bet condition before submitting.</strong>
+    `;
+    return;
+  }
+
+  if (!appState.hasContract) {
+    appState.lastTx = demoTxId("demo_submit");
+    $("#resolver-output").innerHTML = `
+      <span>Demo transaction prepared</span>
+      <strong>Bet submitted locally for ${stake} ${asset}.</strong>
+      <p>Tx: ${appState.lastTx}</p>
+    `;
+    return;
+  }
+
+  // Live GenLayer write
+  $("#resolver-output").innerHTML = `
+    <span>Submitting to GenLayer…</span>
+    <strong>Sending update_market(). Waiting for validator consensus…</strong>
+  `;
+
+  try {
+    const contract = await getConfiguredContractAddress();
+    const match = matches[0] || fallbackMatches[0];
+    const { txHash } = await writeContractUpdateMarket(contract, match, condition);
+    appState.lastTx = txHash;
+
+    // Read back the confirmed on-chain state
+    const market = await readContractMarket(contract);
+
+    $("#resolver-output").innerHTML = `
+      <span>Bet submitted ✓</span>
+      <strong>update_market() accepted on ${networkLabels[$("#rpc-target").value] || "GenLayer"}.</strong>
+      <div class="result-grid">
+        <div class="result-chip"><span>Tx</span><strong>${shortAddress(txHash)}</strong></div>
+        <div class="result-chip"><span>Stake</span><strong>${stake} ${asset}</strong></div>
+        <div class="result-chip"><span>Contract</span><strong>Configured</strong></div>
+        <div class="result-chip"><span>Condition</span><strong>${market.condition || condition}</strong></div>
+      </div>
+    `;
+  } catch (error) {
+    $("#resolver-output").innerHTML = `
+      <span>Transaction failed</span>
+      <strong>${error.message || "GenLayer write failed."}</strong>
+      <p>Check contract, wallet funds, and network.</p>
+    `;
+  }
+}
+
+// ─── Resolve bet ──────────────────────────────────────────────────────────────
+async function resolveBet() {
+  const stake = $("#stake").value;
+  const asset = $("#asset").value;
+
+  if (!appState.hasContract) {
+    const condition = $("#bet-condition").value.trim();
+    const confidence = Math.floor(72 + Math.random() * 18);
+    const verdict = condition.toLowerCase().includes("beat")
+      ? "Likely valid if final score holds"
+      : "Needs clearer settlement wording";
+    $("#resolver-output").innerHTML = `
+      <span>GenLayer AI resolver simulation</span>
+      <strong>${verdict}</strong>
+      <div class="result-grid">
+        <div class="result-chip"><span>Stake</span><strong>${stake} ${asset}</strong></div>
+        <div class="result-chip"><span>Confidence</span><strong>${confidence}%</strong></div>
+      </div>
+    `;
+    return;
+  }
+
+  if (!appState.wallet) {
+    await connectWallet();
+    if (!appState.wallet) return;
+  }
+
+  $("#resolver-output").innerHTML = `
+    <span>Resolving on GenLayer…</span>
+    <strong>Calling resolve().</strong>
+    <p>AI validators are reading live match data.</p>
+  `;
+
+  try {
+    const contract = await getConfiguredContractAddress();
+    const { txHash } = await writeContractResolve(contract);
+    appState.lastTx = txHash;
+
+    // Read the resolved state back
+    const market = await readContractMarket(contract);
+
+    const verdictColor =
+      market.verdict === "true" ? "#51e08b" : market.verdict === "false" ? "#ff6f61" : "#f6c85f";
+
+    $("#resolver-output").innerHTML = `
+      <span>Resolution complete ✓</span>
+      <strong style="color:${verdictColor}">Verdict: ${market.verdict?.toUpperCase() ?? "UNRESOLVED"}</strong>
+      <div class="result-grid">
+        <div class="result-chip"><span>Score</span><strong>${market.final_score}</strong></div>
+        <div class="result-chip"><span>Confidence</span><strong>${market.confidence}%</strong></div>
+        <div class="result-chip"><span>Tx</span><strong>${shortAddress(txHash)}</strong></div>
+        <div class="result-chip"><span>Condition</span><strong>${market.condition}</strong></div>
+      </div>
+    `;
+  } catch (error) {
+    $("#resolver-output").innerHTML = `
+      <span>Resolve failed</span>
+      <strong>${error.message || "GenLayer resolve() call failed."}</strong>
+      <p>Try again after the final whistle.</p>
+    `;
+  }
+}
+
+// ─── Boot ─────────────────────────────────────────────────────────────────────
+updateClock();
+renderSignals();
+renderMarkets();    // renders fallbackMatches immediately — no empty flash on load
+refreshFeatured();
+loadPublicConfig();
+loadLiveMatches();  // async: replaces fallback once live feed responds
+
+setInterval(updateClock, 1000);
+setInterval(refreshFeatured, 9_000);
+setInterval(loadLiveMatches, 60_000);
+
+$("#connect-wallet").addEventListener("click", connectWallet);
+$("#refresh-featured").addEventListener("click", refreshFeatured);
+$("#refresh-live-matches").addEventListener("click", loadLiveMatches);
+$("#bet-condition").addEventListener("input", () => {
+  appState.conditionTouched = true;
+});
+$("#reset-condition").addEventListener("click", () => {
+  setConditionFromMatch();
+});
+$("#submit-bet").addEventListener("click", submitBet);
+$("#simulate-resolve").addEventListener("click", resolveBet);
+$("#rpc-target").addEventListener("change", updateContractLabels);
+
+if (window.ethereum) {
+  window.ethereum
+    .request({ method: "eth_accounts" })
+    .then((accounts) => {
+      if (accounts[0]) setWalletConnected(accounts[0], "Connected");
+    })
+    .catch(() => {});
+} else {
+  $("#wallet-status").textContent = "No browser wallet detected";
+}
