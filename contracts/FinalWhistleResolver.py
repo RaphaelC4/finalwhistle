@@ -47,17 +47,17 @@ class FinalWhistleResolver(gl.Contract):
     @gl.public.write
     def update_condition(self, condition: str):
         if self.has_resolved:
-            raise Exception("Market already resolved")
+            raise gl.vm.UserError("Market already resolved")
         if gl.message.sender_address != self.owner:
-            raise Exception("Only the market creator can update the condition")
+            raise gl.vm.UserError("Only the market creator can update the condition")
         self.condition = condition
 
     @gl.public.write
     def update_market(self, game_date: str, home_team: str, away_team: str, condition: str, resolution_url: str):
         if self.has_resolved:
-            raise Exception("Market already resolved")
+            raise gl.vm.UserError("Market already resolved")
         if gl.message.sender_address != self.owner:
-            raise Exception("Only the market creator can update the market")
+            raise gl.vm.UserError("Only the market creator can update the market")
         self.game_date = game_date
         self.home_team = home_team
         self.away_team = away_team
@@ -94,7 +94,20 @@ class FinalWhistleResolver(gl.Contract):
             }}
             """
             result = gl.nondet.exec_prompt(task).replace("```json", "").replace("```", "")
-            return json.dumps(json.loads(result), sort_keys=True)
+            parsed = json.loads(result)
+
+            # Only the deterministic outcome fields go into the equivalence
+            # check. "reason" is free-form LLM prose: validators can agree
+            # on the score/verdict/confidence while phrasing the reason
+            # differently, and a strict string comparison that includes it
+            # would make consensus fail even when everyone agrees on the
+            # actual result. Strip it before serialization.
+            comparable = {
+                "score": str(parsed.get("score", "-")),
+                "verdict": str(parsed.get("verdict", "unresolved")),
+                "confidence": str(parsed.get("confidence", "0")),
+            }
+            return json.dumps(comparable, sort_keys=True)
 
         result = json.loads(gl.eq_principle.strict_eq(nondet))
 

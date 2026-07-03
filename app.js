@@ -212,10 +212,15 @@ function todayISO() {
 }
 
 function buildSourceUrl(match) {
-  if (match.fixtureId) {
-    return `https://www.api-football.com/documentation-v3#tag/Fixtures/operation/get-fixtures?fixture=${match.fixtureId}`;
-  }
-  return match.sourceUrl || "https://www.api-football.com/";
+  // The contract's LLM resolver needs a page it can actually read a live
+  // match report or score from. Provider "documentation" URLs and raw API
+  // endpoints (api-football.com/documentation-v3, v3.football.api-sports.io)
+  // are either static docs or require an auth header the contract can't
+  // send, so gl.nondet.web.get always comes back empty/unresolved.
+  // Instead, point at the public BBC Sport fixtures/scores page for the
+  // match date, which lists final scores in plain readable HTML.
+  const isoDate = match.matchDate || todayISO();
+  return `https://www.bbc.com/sport/football/scores-fixtures/${isoDate}`;
 }
 
 function findValue(object, keys) {
@@ -294,6 +299,7 @@ function normalizeSportSrcMatch(raw, index) {
       raw.url ||
       raw.sourceUrl ||
       `https://sportsrc.org/event/${raw.id || encodeURIComponent(raw.title || "")}`,
+    matchDate: kickoffDate ? kickoffDate.toISOString().slice(0, 10) : todayISO(),
     kickoffTime: kickoffDate ? kickoffDate.getTime() : 0,
     homeTeam,
     awayTeam,
@@ -326,6 +332,7 @@ function normalizeApiFootballMatch(raw, index) {
     meta: `${statusLong}${date ? ` - ${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""}`,
     status: isLive && elapsed ? `Live ${elapsed}'` : statusLong,
     sourceUrl: `https://v3.football.api-sports.io/fixtures?id=${raw.fixture?.id || ""}`,
+    matchDate: date ? date.toISOString().slice(0, 10) : todayISO(),
     kickoffTime: date ? date.getTime() : 0,
     homeTeam: raw.teams?.home?.name || "Home",
     awayTeam: raw.teams?.away?.name || "Away",
