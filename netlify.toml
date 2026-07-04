@@ -14,7 +14,7 @@
   status = 200
 
 [[redirects]]
-  from = "/api/contract-address"
+  from = "/api/dd782e8a1895120405134e125ae6dab3"
   to = "/.netlify/functions/contract-address"
   status = 200
 
