@@ -106,12 +106,8 @@ const signals = [
   ["Market drift", "Public price moved slower than the AI probability update.", "+9%"],
 ];
 
-const reads = [
-  "Arsenal pressure is rising after two high-quality chances.",
-  "City's passing tempo dropped, increasing draw protection.",
-  "The model sees late goal risk from both benches.",
-  "Validator consensus favors the home win, but confidence is not final.",
-];
+// AI read is generated live from the current probabilities in buildAiRead() —
+// see below. No static string pool.
 
 // ─── GenLayer chain map ───────────────────────────────────────────────────────
 const chainMap = {
@@ -132,9 +128,72 @@ const appState = {
   lastTx: "",
   liveFeed: "fallback",
   conditionTouched: false,
+  dateTouched: false,
   hasContract: false,
   contractAddress: "",
+  lastBetId: "",
 };
+
+// ─── Odds comparison sources ──────────────────────────────────────────────────
+// Fictional market names (not real bookmakers) since these are simulated
+// prices derived from the model's own probability, offset per source so the
+// comparison is meaningful rather than four copies of the same number.
+const oddsSources = [
+  { name: "Pitchside Odds", variance: 4 },
+  { name: "Kickoff Markets", variance: -3 },
+  { name: "Fulltime Exchange", variance: 2 },
+  { name: "FinalWhistle AI", variance: 0, isAi: true },
+];
+
+// ─── Bet history (localStorage) ────────────────────────────────────────────────
+const BET_HISTORY_KEY = "finalwhistle:bet-history";
+
+function loadBetHistory() {
+  try {
+    const raw = localStorage.getItem(BET_HISTORY_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveBetHistory(bets) {
+  try {
+    localStorage.setItem(BET_HISTORY_KEY, JSON.stringify(bets.slice(0, 50)));
+  } catch {
+    // Storage can fail (private browsing, quota) — history just won't persist.
+  }
+}
+
+let betHistory = loadBetHistory();
+
+function addBetRecord(record) {
+  betHistory = [record, ...betHistory];
+  saveBetHistory(betHistory);
+  appState.lastBetId = record.id;
+  renderBetHistory();
+  renderLeaderboard();
+}
+
+function updateLastBetRecord(patch) {
+  if (!appState.lastBetId) return;
+  betHistory = betHistory.map((bet) => (bet.id === appState.lastBetId ? { ...bet, ...patch } : bet));
+  saveBetHistory(betHistory);
+  renderBetHistory();
+  renderLeaderboard();
+}
+
+// ─── Demo leaderboard ───────────────────────────────────────────────────────────
+// Seed rows so the panel isn't empty before anyone has bet history. Clearly
+// separate from real data: the connected wallet's row (if any) is computed
+// live from betHistory below, not from this list.
+const demoLeaderboard = [
+  { name: "0x8f21…4bA0", wins: 41, total: 52 },
+  { name: "0x1cE0…9f3D", wins: 33, total: 47 },
+  { name: "0xAA47…2c11", wins: 29, total: 44 },
+  { name: "0x5d02…7Ef8", wins: 21, total: 36 },
+];
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 const $ = (selector) => document.querySelector(selector);
@@ -184,6 +243,7 @@ function setWalletConnected(address, source = "Wallet") {
   $("#connect-wallet").classList.add("connected");
   $("#connect-wallet").textContent = shortAddress(appState.wallet);
   $("#wallet-status").textContent = `${source} ${shortAddress(appState.wallet)}`;
+  renderLeaderboard();
 }
 
 function updateClock() {
@@ -211,7 +271,7 @@ function todayISO() {
   return `${year}-${month}-${day}`;
 }
 
-function buildSourceUrl(match) {
+function buildSourceUrl(match, isoDateOverride) {
   // The contract's LLM resolver needs a page it can actually read a live
   // match report or score from. Provider "documentation" URLs and raw API
   // endpoints (api-football.com/documentation-v3, v3.football.api-sports.io)
@@ -219,7 +279,7 @@ function buildSourceUrl(match) {
   // send, so gl.nondet.web.get always comes back empty/unresolved.
   // Instead, point at the public BBC Sport fixtures/scores page for the
   // match date, which lists final scores in plain readable HTML.
-  const isoDate = match.matchDate || todayISO();
+  const isoDate = isoDateOverride || match.matchDate || todayISO();
   return `https://www.bbc.com/sport/football/scores-fixtures/${isoDate}`;
 }
 
@@ -386,7 +446,9 @@ function setFeaturedMatch(match) {
   if (!appState.conditionTouched) {
     setConditionFromMatch(match);
   }
-  $("#match-date").value = todayISO();
+  if (!appState.dateTouched) {
+    $("#match-date").value = match.matchDate || todayISO();
+  }
 }
 
 function setConditionFromMatch(match = matches[0] || fallbackMatches[0]) {
@@ -404,10 +466,76 @@ function refreshFeatured() {
   $("#draw-prob").textContent = `${draw}%`;
   $("#away-prob").textContent = `${away}%`;
   $("#featured-confidence").textContent = `${home}%`;
-  $("#ai-read").textContent = reads[Math.floor(Math.random() * reads.length)];
+  $("#ai-read").textContent = buildAiRead(base, home, draw, away);
+  renderOddsBoard(home, draw, away);
   setBar("#home-bar", home);
   setBar("#draw-bar", draw);
   setBar("#away-bar", away);
+}
+
+function describeGap(gap) {
+  if (gap >= 30) return "strongly favors";
+  if (gap >= 12) return "leans toward";
+  return "sees a close call, tilting slightly toward";
+}
+
+function buildAiRead(match, home, draw, away) {
+  const top = Math.max(home, draw, away);
+  const isLive = /live/i.test(match.status || "");
+  const scoreKnown = isLive && match.homeScore !== "-" && match.homeScore !== undefined && match.homeScore !== null;
+  const scoreNote = scoreKnown ? ` at ${match.homeScore}-${match.awayScore}` : "";
+
+  if (top === draw && draw >= home && draw >= away) {
+    return `Model rates the draw most likely (${draw}%) between ${match.homeTeam} and ${match.awayTeam}${scoreNote}.`;
+  }
+
+  const homeLeads = home >= away;
+  const leader = homeLeads ? match.homeTeam : match.awayTeam;
+  const trailer = homeLeads ? match.awayTeam : match.homeTeam;
+  const leadProb = homeLeads ? home : away;
+  const gap = Math.abs(home - away);
+
+  return `Model ${describeGap(gap)} ${leader} over ${trailer}${scoreNote}, at ${leadProb}% win probability.`;
+}
+
+function toDecimalOdds(prob) {
+  const safe = Math.min(96, Math.max(4, prob));
+  return (100 / safe).toFixed(2);
+}
+
+function buildOddsRows(home, draw, away) {
+  return oddsSources.map((source) => {
+    const h = Math.min(92, Math.max(4, home + source.variance));
+    const d = Math.min(92, Math.max(4, draw - source.variance / 2));
+    const a = Math.max(4, 100 - h - d);
+    return { ...source, home: toDecimalOdds(h), draw: toDecimalOdds(d), away: toDecimalOdds(a) };
+  });
+}
+
+function renderOddsBoard(home, draw, away) {
+  const rows = buildOddsRows(home, draw, away);
+  const bestHome = Math.max(...rows.map((row) => Number(row.home)));
+  const bestDraw = Math.max(...rows.map((row) => Number(row.draw)));
+  const bestAway = Math.max(...rows.map((row) => Number(row.away)));
+
+  const cell = (value, best) => `<span class="odds-cell${Number(value) === best ? " best" : ""}">${value}</span>`;
+
+  $("#odds-board").innerHTML = `
+    <div class="odds-row odds-head">
+      <span>Source</span><span>Home</span><span>Draw</span><span>Away</span>
+    </div>
+    ${rows
+      .map(
+        (row) => `
+      <div class="odds-row${row.isAi ? " odds-ai" : ""}">
+        <span class="odds-source">${row.isAi ? '<span class="ai-dot"></span>' : ""}${row.name}</span>
+        ${cell(row.home, bestHome)}
+        ${cell(row.draw, bestDraw)}
+        ${cell(row.away, bestAway)}
+      </div>`
+      )
+      .join("")}
+  `;
 }
 
 function renderSignals() {
@@ -465,6 +593,74 @@ function renderMarkets() {
 }
 
 // ─── Live match feeds ─────────────────────────────────────────────────────────
+function verdictLabel(status, verdict) {
+  if (status === "pending") return "Pending";
+  if (verdict === "true") return "Won";
+  if (verdict === "false") return "Lost";
+  return "Unresolved";
+}
+
+function renderBetHistory() {
+  const container = $("#bet-history-list");
+  if (!betHistory.length) {
+    container.innerHTML = `<div class="empty-state">No bets yet — submit one from the resolver above and it'll show up here.</div>`;
+    return;
+  }
+
+  container.innerHTML = betHistory
+    .map((bet) => {
+      const badgeClass = bet.status === "pending" ? "pending" : bet.verdict || "unresolved";
+      return `
+        <div class="bet-row">
+          <div>
+            <span class="bet-row-match">${bet.matchTitle}</span>
+            <span class="bet-row-condition">${bet.condition}</span>
+          </div>
+          <div class="bet-row-stake">
+            <strong>${bet.stake} ${bet.asset}</strong>
+            <span>${new Date(bet.timestamp).toLocaleDateString()}</span>
+          </div>
+          <span class="status-badge ${badgeClass}">${verdictLabel(bet.status, bet.verdict)}</span>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function renderLeaderboard() {
+  const container = $("#leaderboard-list");
+  const resolved = betHistory.filter((bet) => bet.status === "resolved" && bet.verdict !== "unresolved");
+  const rows = [...demoLeaderboard];
+
+  if (appState.wallet) {
+    const wins = resolved.filter((bet) => bet.verdict === "true").length;
+    const total = resolved.length;
+    rows.push({ name: shortAddress(appState.wallet), wins, total, you: true });
+  }
+
+  rows.sort((a, b) => {
+    const rateA = a.total ? a.wins / a.total : 0;
+    const rateB = b.total ? b.wins / b.total : 0;
+    return rateB - rateA || b.total - a.total;
+  });
+
+  container.innerHTML = rows
+    .map((row, index) => {
+      const winRate = row.total ? Math.round((row.wins / row.total) * 100) : 0;
+      return `
+        <div class="leaderboard-row${row.you ? " you" : ""}">
+          <span class="leaderboard-rank">${index + 1}</span>
+          <div>
+            <span class="leaderboard-name">${row.you ? `You · ${row.name}` : row.name}</span>
+            <span class="leaderboard-meta">${row.wins}W / ${row.total - row.wins}L${row.total ? "" : " · no resolved bets yet"}</span>
+          </div>
+          <span class="leaderboard-winrate">${row.total ? `${winRate}%` : "—"}</span>
+        </div>
+      `;
+    })
+    .join("");
+}
+
 async function loadLiveMatches() {
   const status = $("#feed-status");
   status.textContent = "Loading today's football matches...";
@@ -568,10 +764,11 @@ async function readContractMarket(contractAddress) {
 /** Write: call update_market() to update bet condition on-chain. */
 async function writeContractUpdateMarket(contractAddress, match, condition) {
   const client = buildGenLayerClient();
+  const gameDate = $("#match-date").value || match.matchDate || todayISO();
   const txHash = await client.writeContract({
     address: contractAddress,
     functionName: "update_market",
-    args: [todayISO(), match.homeTeam, match.awayTeam, condition, buildSourceUrl(match)],
+    args: [gameDate, match.homeTeam, match.awayTeam, condition, buildSourceUrl(match, gameDate)],
     value: 0n,
   });
   const receipt = await client.waitForTransactionReceipt({
@@ -658,6 +855,17 @@ async function submitBet() {
 
   if (!appState.hasContract) {
     appState.lastTx = demoTxId("demo_submit");
+    const match = matches[0] || fallbackMatches[0];
+    addBetRecord({
+      id: appState.lastTx,
+      matchTitle: match.title,
+      condition,
+      stake,
+      asset,
+      status: "pending",
+      verdict: null,
+      timestamp: Date.now(),
+    });
     $("#resolver-output").innerHTML = `
       <span>Demo transaction prepared</span>
       <strong>Bet submitted locally for ${stake} ${asset}.</strong>
@@ -680,6 +888,17 @@ async function submitBet() {
 
     // Read back the confirmed on-chain state
     const market = await readContractMarket(contract);
+
+    addBetRecord({
+      id: txHash,
+      matchTitle: match.title,
+      condition: market.condition || condition,
+      stake,
+      asset,
+      status: "pending",
+      verdict: null,
+      timestamp: Date.now(),
+    });
 
     $("#resolver-output").innerHTML = `
       <span>Bet submitted ✓</span>
@@ -708,9 +927,16 @@ async function resolveBet() {
   if (!appState.hasContract) {
     const condition = $("#bet-condition").value.trim();
     const confidence = Math.floor(72 + Math.random() * 18);
-    const verdict = condition.toLowerCase().includes("beat")
+    const likelyValid = condition.toLowerCase().includes("beat");
+    const verdict = likelyValid
       ? "Likely valid if final score holds"
       : "Needs clearer settlement wording";
+    if (appState.lastBetId) {
+      updateLastBetRecord({
+        status: "resolved",
+        verdict: likelyValid ? "true" : "unresolved",
+      });
+    }
     $("#resolver-output").innerHTML = `
       <span>GenLayer AI resolver simulation</span>
       <strong>${verdict}</strong>
@@ -741,6 +967,12 @@ async function resolveBet() {
     // Read the resolved state back
     const market = await readContractMarket(contract);
 
+    updateLastBetRecord({
+      status: "resolved",
+      verdict: market.verdict,
+      finalScore: market.final_score,
+    });
+
     const verdictColor =
       market.verdict === "true" ? "#51e08b" : market.verdict === "false" ? "#ff6f61" : "#f6c85f";
 
@@ -768,6 +1000,8 @@ updateClock();
 renderSignals();
 renderMarkets();    // renders fallbackMatches immediately — no empty flash on load
 refreshFeatured();
+renderBetHistory();
+renderLeaderboard();
 loadPublicConfig();
 loadLiveMatches();  // async: replaces fallback once live feed responds
 
@@ -778,11 +1012,23 @@ setInterval(loadLiveMatches, 60_000);
 $("#connect-wallet").addEventListener("click", connectWallet);
 $("#refresh-featured").addEventListener("click", refreshFeatured);
 $("#refresh-live-matches").addEventListener("click", loadLiveMatches);
+$("#clear-bet-history").addEventListener("click", () => {
+  betHistory = [];
+  saveBetHistory(betHistory);
+  appState.lastBetId = "";
+  renderBetHistory();
+  renderLeaderboard();
+});
 $("#bet-condition").addEventListener("input", () => {
   appState.conditionTouched = true;
 });
+$("#match-date").addEventListener("input", () => {
+  appState.dateTouched = true;
+});
 $("#reset-condition").addEventListener("click", () => {
   setConditionFromMatch();
+  appState.dateTouched = false;
+  $("#match-date").value = (matches[0] || fallbackMatches[0]).matchDate || todayISO();
 });
 $("#submit-bet").addEventListener("click", submitBet);
 $("#simulate-resolve").addEventListener("click", resolveBet);

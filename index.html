@@ -45,6 +45,8 @@
           <a class="nav-item" href="#resolver">Resolver</a>
           <a class="nav-item" href="#signals">Signals</a>
           <a class="nav-item" href="#markets">Markets</a>
+          <a class="nav-item" href="#history">My Bets</a>
+          <a class="nav-item" href="#leaderboard">Leaderboard</a>
         </nav>
 
         <div class="network-card">
@@ -127,6 +129,8 @@
                 <strong id="away-prob">14%</strong>
               </div>
             </div>
+
+            <div class="odds-board" id="odds-board" aria-label="Odds comparison across sources"></div>
 
             <div class="insight-strip">
               <div>
@@ -228,6 +232,27 @@
               </div>
             </div>
             <div class="market-list" id="market-list"></div>
+          </article>
+        </section>
+
+        <section class="content-grid">
+          <article class="panel wide" id="history">
+            <div class="section-heading row-heading">
+              <div>
+                <p class="eyebrow">Your activity</p>
+                <h2>My Bets</h2>
+              </div>
+              <button class="text-button" id="clear-bet-history" type="button">Clear history</button>
+            </div>
+            <div class="bet-history-list" id="bet-history-list"></div>
+          </article>
+
+          <article class="panel" id="leaderboard">
+            <div class="section-heading">
+              <p class="eyebrow">Top predictors</p>
+              <h2>Leaderboard</h2>
+            </div>
+            <div class="leaderboard-list" id="leaderboard-list"></div>
           </article>
         </section>
       </main>
