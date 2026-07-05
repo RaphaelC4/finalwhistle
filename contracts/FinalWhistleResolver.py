@@ -70,8 +70,20 @@ class FinalWhistleResolver(gl.Contract):
             return self.get_market()
 
         def nondet() -> str:
-            response = gl.nondet.web.get(self.resolution_url)
-            web_data = response.body.decode("utf-8")
+            # web.get() does a plain HTTP GET with no JavaScript execution.
+            # Live score pages (like BBC Sport's fixtures page) render their
+            # score data client-side, so web.get() only ever sees an empty
+            # shell — even for a match that's live right now. web.render()
+            # actually executes the page's JS before returning content, so
+            # the LLM gets the real, populated page.
+            try:
+                web_data = gl.nondet.web.render(self.resolution_url, mode="html")
+            except Exception:
+                # Source unreachable/blocked this round — fall through with
+                # empty content so the LLM (and prompt below) treats it as
+                # "can't confirm a result yet" instead of crashing the call.
+                web_data = ""
+
             task = f"""
             You are resolving a football prediction market.
 
@@ -93,8 +105,17 @@ class FinalWhistleResolver(gl.Contract):
                 "reason": "short reason"
             }}
             """
-            result = gl.nondet.exec_prompt(task).replace("```json", "").replace("```", "")
-            parsed = json.loads(result)
+            raw = gl.nondet.exec_prompt(task)
+            cleaned = raw.replace("```json", "").replace("```", "").strip()
+
+            try:
+                parsed = json.loads(cleaned)
+            except (json.JSONDecodeError, TypeError):
+                # The model didn't return clean JSON (common when the source
+                # page had nothing readable yet). Fail safe to "unresolved"
+                # rather than raising — a raised exception here would error
+                # out this validator's run and break consensus outright.
+                parsed = {}
 
             # Only the deterministic outcome fields go into the equivalence
             # check. "reason" is free-form LLM prose: validators can agree
