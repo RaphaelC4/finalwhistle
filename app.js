@@ -184,17 +184,6 @@ function updateLastBetRecord(patch) {
   renderLeaderboard();
 }
 
-// ─── Demo leaderboard ───────────────────────────────────────────────────────────
-// Seed rows so the panel isn't empty before anyone has bet history. Clearly
-// separate from real data: the connected wallet's row (if any) is computed
-// live from betHistory below, not from this list.
-const demoLeaderboard = [
-  { name: "0x8f21…4bA0", wins: 41, total: 52 },
-  { name: "0x1cE0…9f3D", wins: 33, total: 47 },
-  { name: "0xAA47…2c11", wins: 29, total: 44 },
-  { name: "0x5d02…7Ef8", wins: 21, total: 36 },
-];
-
 // ─── Utilities ────────────────────────────────────────────────────────────────
 const $ = (selector) => document.querySelector(selector);
 
@@ -338,10 +327,17 @@ function normalizeSportSrcMatch(raw, index) {
   const kickoff = kickoffDate
     ? kickoffDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     : timestamp;
+  // SportSRC's `?data=matches` endpoint is a schedule/fixture list only —
+  // verified against a live response, it returns id/title/teams/date/poster
+  // and nothing else. There is no score field to read here (live or final),
+  // so we don't pretend otherwise. Real live scores only come from the
+  // API-Football feed (raw.goals.home/away in normalizeApiFootballMatch).
+  // SportSRC's `data=detail` endpoint may carry richer per-match data, but
+  // this fallback path doesn't call it (that'd be one request per match).
   const rawStatus = findValue(raw, ["status", "match_status", "state", "time_status", "live_status"]);
-  const status = rawStatus || (kickoffDate && kickoffDate <= new Date() ? "Live/Started" : "Upcoming");
-  const homeScore = findValue(raw, ["home_score", "score_home", "homeScore", "intHomeScore"]) || "-";
-  const awayScore = findValue(raw, ["away_score", "score_away", "awayScore", "intAwayScore"]) || "-";
+  const status = rawStatus || (kickoffDate && kickoffDate <= new Date() ? "Kickoff passed" : "Upcoming");
+  const homeScore = "-";
+  const awayScore = "-";
   const homeLogo =
     raw.teams?.home?.badge ||
     findValue(raw, ["home_badge", "home_logo", "homeLogo", "strHomeTeamBadge"]) ||
@@ -630,12 +626,17 @@ function renderBetHistory() {
 function renderLeaderboard() {
   const container = $("#leaderboard-list");
   const resolved = betHistory.filter((bet) => bet.status === "resolved" && bet.verdict !== "unresolved");
-  const rows = [...demoLeaderboard];
+  const rows = [];
 
   if (appState.wallet) {
     const wins = resolved.filter((bet) => bet.verdict === "true").length;
     const total = resolved.length;
     rows.push({ name: shortAddress(appState.wallet), wins, total, you: true });
+  }
+
+  if (!rows.length) {
+    container.innerHTML = `<div class="empty-state">Connect a wallet and resolve a bet to appear on the leaderboard.</div>`;
+    return;
   }
 
   rows.sort((a, b) => {
@@ -721,8 +722,8 @@ async function loadSportSrcMatches() {
   const eliteCount = todayMatches.filter((m) => prestigeScore(m) > 0).length;
   status.textContent =
     eliteCount > 0
-      ? `SportSRC fallback: ${matches.length} matches today, ${eliteCount} elite`
-      : `SportSRC fallback: ${matches.length} real football matches today`;
+      ? `SportSRC fallback: ${matches.length} matches today, ${eliteCount} elite (schedule only, no live scores)`
+      : `SportSRC fallback: ${matches.length} real football matches today (schedule only, no live scores)`;
 }
 
 // ─── GenLayer SDK helpers ─────────────────────────────────────────────────────
