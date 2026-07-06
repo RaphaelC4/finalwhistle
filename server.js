@@ -44,6 +44,12 @@ function sendJson(response, status, payload) {
   response.end(JSON.stringify(payload));
 }
 
+// Same reasoning as the Netlify function: without a cache, every browser
+// polling this proxy burns a fresh upstream call, and API-Football's free
+// plan only allows 100/day — trivial to blow through with a 60s poll loop.
+const FIXTURES_CACHE_TTL_MS = 50_000;
+const fixturesCache = new Map(); // key -> { body, status, contentType, expiresAt }
+
 async function proxyFixtures(request, response) {
   const apiKey = process.env.API_FOOTBALL_KEY;
   if (!apiKey) {
@@ -54,6 +60,20 @@ async function proxyFixtures(request, response) {
   const requestUrl = new URL(request.url, `http://127.0.0.1:${port}`);
   const date = requestUrl.searchParams.get("date") || new Date().toISOString().slice(0, 10);
   const timezone = requestUrl.searchParams.get("timezone") || "Africa/Lagos";
+  const cacheKey = `${date}:${timezone}`;
+
+  const cached = fixturesCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    response.writeHead(cached.status, {
+      "Content-Type": cached.contentType,
+      "Cache-Control": "public, max-age=45",
+      "X-Content-Type-Options": "nosniff",
+      "X-Cache": "HIT",
+    });
+    response.end(cached.body);
+    return;
+  }
+
   const providerUrl = new URL("https://v3.football.api-sports.io/fixtures");
   providerUrl.searchParams.set("date", date);
   providerUrl.searchParams.set("timezone", timezone);
@@ -62,10 +82,22 @@ async function proxyFixtures(request, response) {
     headers: { "x-apisports-key": apiKey },
   });
   const body = await providerResponse.text();
+  const contentType = providerResponse.headers.get("content-type") || "application/json; charset=utf-8";
+
+  if (providerResponse.ok) {
+    fixturesCache.set(cacheKey, {
+      body,
+      status: providerResponse.status,
+      contentType,
+      expiresAt: Date.now() + FIXTURES_CACHE_TTL_MS,
+    });
+  }
+
   response.writeHead(providerResponse.status, {
-    "Content-Type": providerResponse.headers.get("content-type") || "application/json; charset=utf-8",
-    "Cache-Control": "no-store",
+    "Content-Type": contentType,
+    "Cache-Control": providerResponse.status === 429 ? "no-store" : "public, max-age=45",
     "X-Content-Type-Options": "nosniff",
+    "X-Cache": "MISS",
   });
   response.end(body);
 }

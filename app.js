@@ -668,14 +668,20 @@ async function loadLiveMatches() {
   try {
     await loadApiFootballMatches();
   } catch (error) {
+    const rateLimited = error?.status === 429;
     try {
       await loadSportSrcMatches();
+      if (rateLimited) {
+        status.textContent += " (API-Football daily quota reached — showing schedule-only fallback)";
+      }
     } catch {
       matches = [...fallbackMatchesUnavailable];
       appState.liveFeed = "fallback";
       renderMarkets();
       refreshFeatured();
-      status.textContent = "Live feed unavailable - check server/API configuration";
+      status.textContent = rateLimited
+        ? "API-Football daily quota reached and fallback feed unavailable — live scores will resume tomorrow or on a higher API plan"
+        : "Live feed unavailable - check server/API configuration";
     }
   }
 }
@@ -684,7 +690,11 @@ async function loadApiFootballMatches() {
   const status = $("#feed-status");
   const date = todayISO();
   const response = await fetch(`/api/fixtures?date=${date}&timezone=Africa/Lagos`, { cache: "no-store" });
-  if (!response.ok) throw new Error(`API-Football returned ${response.status}`);
+  if (!response.ok) {
+    const err = new Error(`API-Football returned ${response.status}`);
+    err.status = response.status;
+    throw err;
+  }
   const data = await response.json();
   if (data.errors && Object.keys(data.errors).length) throw new Error(JSON.stringify(data.errors));
   const normalized = (data.response || []).map(normalizeApiFootballMatch);
