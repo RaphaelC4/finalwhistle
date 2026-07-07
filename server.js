@@ -44,53 +44,51 @@ function sendJson(response, status, payload) {
   response.end(JSON.stringify(payload));
 }
 
-// Same reasoning as the Netlify function: without a cache, every browser
-// polling this proxy burns a fresh upstream call, and API-Football's free
-// plan only allows 100/day — trivial to blow through with a 60s poll loop.
-const FIXTURES_CACHE_TTL_MS = 50_000;
-const fixturesCache = new Map(); // key -> { body, status, contentType, expiresAt }
 
-async function proxyFixtures(request, response) {
-  const apiKey = process.env.API_FOOTBALL_KEY;
+// Without a cache, every browser polling this proxy burns a fresh upstream
+// call against whatever quota this RapidAPI plan allows — share one upstream
+// call across all local requests within the TTL window instead of one per poll.
+const SOFASCORE_CACHE_TTL_MS = 50_000;
+let sofascoreCache = null; // { body, status, contentType, expiresAt }
+const SOFASCORE_RAPIDAPI_HOST = "sofascore.p.rapidapi.com";
+
+async function proxySofaScore(response) {
+  const apiKey = process.env.SOFASCORE_RAPIDAPI_KEY;
   if (!apiKey) {
-    sendJson(response, 500, { error: "API_FOOTBALL_KEY is not configured on the server." });
+    sendJson(response, 500, { error: "SOFASCORE_RAPIDAPI_KEY is not configured on the server." });
     return;
   }
 
-  const requestUrl = new URL(request.url, `http://127.0.0.1:${port}`);
-  const date = requestUrl.searchParams.get("date") || new Date().toISOString().slice(0, 10);
-  const timezone = requestUrl.searchParams.get("timezone") || "Africa/Lagos";
-  const cacheKey = `${date}:${timezone}`;
-
-  const cached = fixturesCache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) {
-    response.writeHead(cached.status, {
-      "Content-Type": cached.contentType,
+  if (sofascoreCache && sofascoreCache.expiresAt > Date.now()) {
+    response.writeHead(sofascoreCache.status, {
+      "Content-Type": sofascoreCache.contentType,
       "Cache-Control": "public, max-age=45",
       "X-Content-Type-Options": "nosniff",
       "X-Cache": "HIT",
     });
-    response.end(cached.body);
+    response.end(sofascoreCache.body);
     return;
   }
 
-  const providerUrl = new URL("https://v3.football.api-sports.io/fixtures");
-  providerUrl.searchParams.set("date", date);
-  providerUrl.searchParams.set("timezone", timezone);
+  const providerUrl = new URL(`https://${SOFASCORE_RAPIDAPI_HOST}/tournaments/get-live-events`);
+  providerUrl.searchParams.set("sport", "football");
 
   const providerResponse = await fetch(providerUrl, {
-    headers: { "x-apisports-key": apiKey },
+    headers: {
+      "x-rapidapi-key": apiKey,
+      "x-rapidapi-host": SOFASCORE_RAPIDAPI_HOST,
+    },
   });
   const body = await providerResponse.text();
   const contentType = providerResponse.headers.get("content-type") || "application/json; charset=utf-8";
 
   if (providerResponse.ok) {
-    fixturesCache.set(cacheKey, {
+    sofascoreCache = {
       body,
       status: providerResponse.status,
       contentType,
-      expiresAt: Date.now() + FIXTURES_CACHE_TTL_MS,
-    });
+      expiresAt: Date.now() + SOFASCORE_CACHE_TTL_MS,
+    };
   }
 
   response.writeHead(providerResponse.status, {
@@ -144,8 +142,8 @@ await loadEnv();
 
 createServer(async (request, response) => {
   try {
-    if (request.url?.startsWith("/api/fixtures")) {
-      await proxyFixtures(request, response);
+    if (request.url?.startsWith("/api/sofascore-live")) {
+      await proxySofaScore(response);
       return;
     }
     if (request.url?.startsWith("/api/config")) {

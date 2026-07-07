@@ -12,28 +12,28 @@ AI football prediction and bet-resolution demo for the GenLayer Builder Program.
 
 ## Live football data
 
-The app uses API-Football as the primary production data provider through a local backend proxy:
+The app uses SofaScore (via RapidAPI) as the primary production data provider through a local backend proxy:
 
 ```text
-/api/fixtures?date=YYYY-MM-DD&timezone=Africa/Lagos
+/api/sofascore-live
 ```
 
-Get a free key from:
+Get a key by subscribing to the Sofascore API on RapidAPI:
 
 ```text
-https://dashboard.api-football.com/
+https://rapidapi.com/apidojo/api/sofascore
 ```
 
 Put the key in `.env`:
 
 ```text
-API_FOOTBALL_KEY=your_key_here
+SOFASCORE_RAPIDAPI_KEY=your_key_here
 PORT=4174
 ```
 
-The browser never receives the API key. The Node server calls API-Football with the secret header and returns only fixture data to the frontend.
+The browser never receives the API key. The Node server calls SofaScore with the secret RapidAPI headers and returns only event data to the frontend. Both the local proxy and the Netlify function cache successful responses for ~50 seconds, so many concurrent visitors share one upstream call instead of each burning your quota independently.
 
-If the API-Football proxy is unavailable, the app falls back to:
+If the SofaScore proxy is unavailable or its quota is exhausted, the app falls back to a schedule-only feed (no live scores):
 
 ```text
 https://api.sportsrc.org/?data=matches&category=football
@@ -76,7 +76,7 @@ http://127.0.0.1:4174/
 ## Public deployment checklist
 
 - Do not commit `.env`.
-- Set `API_FOOTBALL_KEY` as a secret environment variable on the hosting platform.
+- Set `SOFASCORE_RAPIDAPI_KEY` as a secret environment variable on the hosting platform.
 - Set `GENLAYER_CONTRACT_ADDRESS` as a secret environment variable on the hosting platform.
 - Run `npm.cmd run build` before deployment.
 - Start the app with `npm.cmd run start` or `node server.js`.

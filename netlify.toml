@@ -4,8 +4,8 @@
   functions = "netlify/functions"
 
 [[redirects]]
-  from = "/api/fixtures"
-  to = "/.netlify/functions/fixtures"
+  from = "/api/sofascore-live"
+  to = "/.netlify/functions/sofascore"
   status = 200
 
 [[redirects]]

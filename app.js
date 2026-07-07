@@ -331,7 +331,8 @@ function normalizeSportSrcMatch(raw, index) {
   // verified against a live response, it returns id/title/teams/date/poster
   // and nothing else. There is no score field to read here (live or final),
   // so we don't pretend otherwise. Real live scores only come from the
-  // API-Football feed (raw.goals.home/away in normalizeApiFootballMatch).
+  // SofaScore feed (raw.homeScore.current/awayScore.current in
+  // normalizeSofaScoreMatch) — this is purely the schedule-only fallback.
   // SportSRC's `data=detail` endpoint may carry richer per-match data, but
   // this fallback path doesn't call it (that'd be one request per match).
   const rawStatus = findValue(raw, ["status", "match_status", "state", "time_status", "live_status"]);
@@ -373,29 +374,42 @@ function normalizeSportSrcMatch(raw, index) {
   };
 }
 
-function normalizeApiFootballMatch(raw, index) {
-  const elapsed = raw.fixture?.status?.elapsed;
-  const statusShort = raw.fixture?.status?.short || "NS";
-  const statusLong = raw.fixture?.status?.long || "Scheduled";
-  const date = raw.fixture?.date ? new Date(raw.fixture.date) : null;
-  const isLive = ["1H", "HT", "2H", "ET", "BT", "P", "LIVE"].includes(statusShort);
-  const homeScore = raw.goals?.home ?? "-";
-  const awayScore = raw.goals?.away ?? "-";
+// SofaScore's underlying event schema is well-established (it's the same
+// shape used across sofascore.com's own site and every wrapper/scraper
+// built on it): homeScore.current / awayScore.current for the live score,
+// status.type for state ("inprogress" | "finished" | "notstarted" | ...),
+// startTimestamp in unix seconds. The RapidAPI "apidojo" wrapper proxies
+// this data directly, so this normalizer targets that real schema rather
+// than guessing at RapidAPI-specific field names.
+function normalizeSofaScoreMatch(raw, index) {
+  const homeTeam = raw.homeTeam?.name || raw.homeTeam?.shortName || "Home";
+  const awayTeam = raw.awayTeam?.name || raw.awayTeam?.shortName || "Away";
+  const statusType = raw.status?.type || "notstarted";
+  const isLive = statusType === "inprogress";
+  const date = raw.startTimestamp ? new Date(raw.startTimestamp * 1000) : null;
+  const homeScore = raw.homeScore?.current ?? raw.homeScore?.display ?? "-";
+  const awayScore = raw.awayScore?.current ?? raw.awayScore?.display ?? "-";
+  const statusLabel =
+    statusType === "finished"
+      ? "Finished"
+      : statusType === "notstarted"
+      ? "Scheduled"
+      : raw.status?.description || "Live";
   const match = {
-    fixtureId: raw.fixture?.id,
-    title: `${raw.teams?.home?.name || "Home"} vs ${raw.teams?.away?.name || "Away"}`,
-    league: raw.league?.name || "Football",
-    meta: `${statusLong}${date ? ` - ${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""}`,
-    status: isLive && elapsed ? `Live ${elapsed}'` : statusLong,
-    sourceUrl: `https://v3.football.api-sports.io/fixtures?id=${raw.fixture?.id || ""}`,
+    eventId: raw.id,
+    title: `${homeTeam} vs ${awayTeam}`,
+    league: raw.tournament?.name || raw.tournament?.uniqueTournament?.name || "Football",
+    meta: `${statusLabel}${date ? ` - ${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""}`,
+    status: isLive && raw.status?.description ? `Live - ${raw.status.description}` : statusLabel,
+    sourceUrl: raw.id ? `https://www.sofascore.com/event/${raw.id}` : "https://www.sofascore.com/",
     matchDate: date ? date.toISOString().slice(0, 10) : todayISO(),
     kickoffTime: date ? date.getTime() : 0,
-    homeTeam: raw.teams?.home?.name || "Home",
-    awayTeam: raw.teams?.away?.name || "Away",
+    homeTeam,
+    awayTeam,
     homeScore,
     awayScore,
-    homeLogo: raw.teams?.home?.logo || makeBadge(raw.teams?.home?.name || "Home"),
-    awayLogo: raw.teams?.away?.logo || makeBadge(raw.teams?.away?.name || "Away"),
+    homeLogo: raw.homeTeam?.id ? `https://api.sofascore.com/api/v1/team/${raw.homeTeam.id}/image` : makeBadge(homeTeam),
+    awayLogo: raw.awayTeam?.id ? `https://api.sofascore.com/api/v1/team/${raw.awayTeam.id}/image` : makeBadge(awayTeam),
     odds: [],
   };
   const probability = inferProbability(match, index);
@@ -666,13 +680,13 @@ async function loadLiveMatches() {
   const status = $("#feed-status");
   status.textContent = "Loading today's football matches...";
   try {
-    await loadApiFootballMatches();
+    await loadSofaScoreMatches();
   } catch (error) {
     const rateLimited = error?.status === 429;
     try {
       await loadSportSrcMatches();
       if (rateLimited) {
-        status.textContent += " (API-Football daily quota reached — showing schedule-only fallback)";
+        status.textContent += " (SofaScore quota reached — showing schedule-only fallback, no live scores)";
       }
     } catch {
       matches = [...fallbackMatchesUnavailable];
@@ -680,31 +694,31 @@ async function loadLiveMatches() {
       renderMarkets();
       refreshFeatured();
       status.textContent = rateLimited
-        ? "API-Football daily quota reached and fallback feed unavailable — live scores will resume tomorrow or on a higher API plan"
+        ? "SofaScore quota reached and fallback feed unavailable — live scores will resume once quota resets"
         : "Live feed unavailable - check server/API configuration";
     }
   }
 }
 
-async function loadApiFootballMatches() {
+async function loadSofaScoreMatches() {
   const status = $("#feed-status");
-  const date = todayISO();
-  const response = await fetch(`/api/fixtures?date=${date}&timezone=Africa/Lagos`, { cache: "no-store" });
+  const response = await fetch("/api/sofascore-live", { cache: "no-store" });
   if (!response.ok) {
-    const err = new Error(`API-Football returned ${response.status}`);
+    const err = new Error(`SofaScore returned ${response.status}`);
     err.status = response.status;
     throw err;
   }
   const data = await response.json();
-  if (data.errors && Object.keys(data.errors).length) throw new Error(JSON.stringify(data.errors));
-  const normalized = (data.response || []).map(normalizeApiFootballMatch);
-  if (!normalized.length) throw new Error("API-Football returned no fixtures today");
+  const list = data.events || data.data || data.response || [];
+  if (!Array.isArray(list) || !list.length) throw new Error("SofaScore returned no live events right now");
+  const normalized = list.map(normalizeSofaScoreMatch).filter((m) => m.homeTeam && m.awayTeam);
+  if (!normalized.length) throw new Error("SofaScore returned no usable events");
   matches = buildEliteMatchList(normalized);
-  appState.liveFeed = "api-football";
+  appState.liveFeed = "sofascore";
   renderMarkets();
   refreshFeatured();
   const eliteCount = matches.filter((m) => prestigeScore(m) > 0).length;
-  status.textContent = `API-Football live: ${matches.length} matches today, ${eliteCount} elite`;
+  status.textContent = `SofaScore live: ${matches.length} matches in play, ${eliteCount} elite`;
 }
 
 async function loadSportSrcMatches() {
