@@ -824,6 +824,46 @@ async function writeContractResolve(contractAddress) {
 }
 
 // ─── Wallet ───────────────────────────────────────────────────────────────────
+/**
+ * MetaMask (and other injected wallets) stay on whatever chain they were last
+ * on — usually Ethereum Mainnet by default. genlayer-js's writeContract calls
+ * go out through that same injected provider, so if the wallet's active chain
+ * doesn't match the GenLayer chain we're targeting, signing silently fails or
+ * gets rejected with a chain-mismatch error. This asks the wallet to switch,
+ * adding the chain first if the wallet doesn't know about it yet.
+ */
+async function ensureWalletChain(chain) {
+  if (!window.ethereum || !chain?.id) return;
+  const targetChainId = `0x${chain.id.toString(16)}`;
+  const currentChainId = await window.ethereum.request({ method: "eth_chainId" });
+  if (currentChainId?.toLowerCase() === targetChainId.toLowerCase()) return;
+
+  try {
+    await window.ethereum.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: targetChainId }],
+    });
+  } catch (switchError) {
+    // 4902: wallet doesn't have this chain configured yet — add it, then switch.
+    if (switchError?.code === 4902) {
+      await window.ethereum.request({
+        method: "wallet_addEthereumChain",
+        params: [
+          {
+            chainId: targetChainId,
+            chainName: chain.name,
+            nativeCurrency: chain.nativeCurrency,
+            rpcUrls: chain.rpcUrls?.default?.http || [],
+            blockExplorerUrls: chain.blockExplorers?.default?.url ? [chain.blockExplorers.default.url] : [],
+          },
+        ],
+      });
+    } else {
+      throw switchError;
+    }
+  }
+}
+
 async function connectWallet() {
   const manualWallet = $("#manual-wallet")?.value.trim();
   if (manualWallet) {
@@ -848,6 +888,20 @@ async function connectWallet() {
     $("#connect-wallet").textContent = "Connecting...";
     const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
     if (!accounts[0]) throw new Error("No account returned");
+
+    const chain = chainMap[$("#rpc-target").value] || studionet;
+    try {
+      await ensureWalletChain(chain);
+    } catch (chainError) {
+      setWalletConnected(accounts[0], "Connected");
+      $("#resolver-output").innerHTML = `
+        <span>Wrong network in wallet</span>
+        <strong>Connected, but your wallet is still on the wrong chain.</strong>
+        <p>${chainError.message || "Approve the network switch/add prompt to enable signing."} Transactions will fail to sign until your wallet is on ${chain.name}.</p>
+      `;
+      return;
+    }
+
     setWalletConnected(accounts[0], "Connected");
   } catch (error) {
     $("#connect-wallet").textContent = "Connect Wallet";
@@ -1057,7 +1111,19 @@ $("#reset-condition").addEventListener("click", () => {
 });
 $("#submit-bet").addEventListener("click", submitBet);
 $("#simulate-resolve").addEventListener("click", resolveBet);
-$("#rpc-target").addEventListener("change", updateContractLabels);
+$("#rpc-target").addEventListener("change", () => {
+  updateContractLabels();
+  if (appState.wallet && window.ethereum) {
+    const chain = chainMap[$("#rpc-target").value] || studionet;
+    ensureWalletChain(chain).catch((chainError) => {
+      $("#resolver-output").innerHTML = `
+        <span>Wrong network in wallet</span>
+        <strong>Couldn't switch your wallet to ${chain.name}.</strong>
+        <p>${chainError.message || "Approve the network switch/add prompt to enable signing."}</p>
+      `;
+    });
+  }
+});
 
 if (window.ethereum) {
   window.ethereum
