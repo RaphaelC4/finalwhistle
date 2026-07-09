@@ -99,15 +99,20 @@ const prestigeTerms = [
   "sevilla", "espanyol", "almeria",
 ];
 
-const signals = [
-  ["Shot quality", "Home xG trend has improved across the last 12 minutes.", "+18%"],
-  ["Momentum", "Possession is stable, but final-third entries favor Arsenal.", "+11%"],
-  ["Risk", "One yellow card creates defensive substitution pressure.", "-6%"],
-  ["Market drift", "Public price moved slower than the AI probability update.", "+9%"],
-];
-
 // AI read is generated live from the current probabilities in buildAiRead() —
 // see below. No static string pool.
+
+function buildSignals(match, home, draw, away) {
+  const gap = Math.abs(home - away);
+  const favorite = home >= away ? match.homeTeam : match.awayTeam;
+  const isLive = /live/i.test(match.status || "");
+
+  return [
+    ["Model lean", `${favorite} favored by ${gap} pts`, `${Math.max(home, away)}%`],
+    ["Draw risk", draw >= 30 ? "Elevated — tight matchup" : "Low — clear favorite", `${draw}%`],
+    ["Match state", isLive ? match.status.replace(/^Live\s*-?\s*/i, "") || "In play" : match.status || "Scheduled", isLive ? "Live" : "—"],
+  ];
+}
 
 // ─── GenLayer chain map ───────────────────────────────────────────────────────
 const chainMap = {
@@ -478,6 +483,7 @@ function refreshFeatured() {
   $("#featured-confidence").textContent = `${home}%`;
   $("#ai-read").textContent = buildAiRead(base, home, draw, away);
   renderOddsBoard(home, draw, away);
+  renderSignals(base, home, draw, away);
   setBar("#home-bar", home);
   setBar("#draw-bar", draw);
   setBar("#away-bar", away);
@@ -548,8 +554,8 @@ function renderOddsBoard(home, draw, away) {
   `;
 }
 
-function renderSignals() {
-  $("#signal-list").innerHTML = signals
+function renderSignals(match, home, draw, away) {
+  $("#signal-list").innerHTML = buildSignals(match, home, draw, away)
     .map(
       ([title, copy, score]) => `
         <div class="signal-item">
@@ -1076,9 +1082,8 @@ async function resolveBet() {
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 updateClock();
-renderSignals();
 renderMarkets();    // renders fallbackMatches immediately — no empty flash on load
-refreshFeatured();
+refreshFeatured();  // also calls renderSignals() with live match data
 renderBetHistory();
 renderLeaderboard();
 loadPublicConfig();
