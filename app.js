@@ -413,8 +413,12 @@ function normalizeSofaScoreMatch(raw, index) {
     awayTeam,
     homeScore,
     awayScore,
-    homeLogo: raw.homeTeam?.id ? `https://api.sofascore.com/api/v1/team/${raw.homeTeam.id}/image` : makeBadge(homeTeam),
-    awayLogo: raw.awayTeam?.id ? `https://api.sofascore.com/api/v1/team/${raw.awayTeam.id}/image` : makeBadge(awayTeam),
+    // SofaScore's own image CDN (api.sofascore.com/api/v1/team/{id}/image)
+    // returns 403 when hotlinked from outside sofascore.com — confirmed via
+    // console errors during testing, not a guess. Rather than show a broken
+    // image icon for every match, use the generated initials badge directly.
+    homeLogo: makeBadge(homeTeam),
+    awayLogo: makeBadge(awayTeam),
     odds: [],
   };
   const probability = inferProbability(match, index);
@@ -444,8 +448,12 @@ function buildEliteMatchList(liveMatches) {
 function setImage(selector, src, alt) {
   const image = $(selector);
   if (!image) return;
-  image.src = src || makeBadge(alt);
   image.alt = alt;
+  image.onerror = () => {
+    image.onerror = null; // avoid loop if the badge fallback itself somehow fails
+    image.src = makeBadge(alt);
+  };
+  image.src = src || makeBadge(alt);
 }
 
 function setFeaturedMatch(match) {
@@ -578,9 +586,9 @@ function renderMarkets() {
           <div>
             <span class="market-title">
               <span class="market-team">
-                ${match.homeLogo ? `<img class="market-logo" src="${match.homeLogo}" alt="${match.homeTeam} logo" />` : ""}
+                ${match.homeLogo ? `<img class="market-logo" src="${match.homeLogo}" alt="${match.homeTeam} logo" onerror="this.onerror=null;this.src='${makeBadge(match.homeTeam)}'" />` : ""}
                 ${match.title}
-                ${match.awayLogo ? `<img class="market-logo" src="${match.awayLogo}" alt="${match.awayTeam} logo" />` : ""}
+                ${match.awayLogo ? `<img class="market-logo" src="${match.awayLogo}" alt="${match.awayTeam} logo" onerror="this.onerror=null;this.src='${makeBadge(match.awayTeam)}'" />` : ""}
               </span>
             </span>
             <span class="market-meta">${match.league} - ${match.meta}</span>
