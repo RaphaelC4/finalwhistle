@@ -58,6 +58,32 @@ GENLAYER_CONTRACT_ADDRESS=your_contract_address_here
 GENLAYER_NETWORK=studionet
 ```
 
+## Automatic resolution (keeper function)
+
+Resolving a bet isn't automatic by default — someone has to click "Resolve" after the match ends. `netlify/functions/resolve-keeper.js` is a Netlify Scheduled Function that does this for you, running every 30 minutes: it checks whether the configured market's `game_date` has passed and `has_resolved` is still `false`, and if so, calls `resolve()` itself.
+
+Because there's no human in the loop to approve a signature, this needs its own wallet to sign with — a **dedicated keeper wallet, never your personal one**. On studionet this wallet only ever holds test tokens with no real value, so the security bar is much lower than it would be on a mainnet deployment — but the separation habit is still worth keeping if you ever move this to a network where funds matter.
+
+Generate one:
+
+```bash
+node --input-type=module -e "
+import { generatePrivateKey, createAccount } from 'genlayer-js';
+const pk = generatePrivateKey();
+const account = createAccount(pk);
+console.log('privateKey:', pk);
+console.log('address:', account.address);
+"
+```
+
+Fund the printed address with studionet test tokens (via GenLayer's studio faucet/dashboard), then set the private key as a secret — locally in `.env` and in Netlify's environment variables:
+
+```text
+KEEPER_PRIVATE_KEY=0x_the_private_key_you_generated
+```
+
+The scheduled function only runs on published (production) deploys, not deploy previews, and its logs show up in Netlify's Functions panel under `resolve-keeper` with a "Scheduled" badge.
+
 ## Run the frontend
 
 Build and run the secured local server:
@@ -78,6 +104,7 @@ http://127.0.0.1:4174/
 - Do not commit `.env`.
 - Set `SOFASCORE_RAPIDAPI_KEY` as a secret environment variable on the hosting platform.
 - Set `GENLAYER_CONTRACT_ADDRESS` as a secret environment variable on the hosting platform.
+- Set `KEEPER_PRIVATE_KEY` as a secret environment variable if you want automatic resolution (see "Automatic resolution" above) — use a dedicated keeper wallet, not a personal one.
 - Run `npm.cmd run build` before deployment.
 - Start the app with `npm.cmd run start` or `node server.js`.
 - Rotate any API key that was shared during development before publishing.
