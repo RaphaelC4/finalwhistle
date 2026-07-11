@@ -100,6 +100,42 @@ async function proxySofaScore(response) {
   response.end(body);
 }
 
+async function proxyTeamLogo(request, response) {
+  const requestUrl = new URL(request.url, `http://127.0.0.1:${port}`);
+  const teamId = requestUrl.searchParams.get("teamId");
+  if (!teamId || !/^\d+$/.test(teamId)) {
+    response.writeHead(400, { "Content-Type": "text/plain" });
+    response.end("Missing or invalid teamId");
+    return;
+  }
+
+  try {
+    const providerResponse = await fetch(`https://api.sofascore.com/api/v1/team/${teamId}/image`, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        Referer: "https://www.sofascore.com/",
+        Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+      },
+    });
+    const contentType = providerResponse.headers.get("content-type") || "";
+    if (!providerResponse.ok || !contentType.startsWith("image/")) {
+      response.writeHead(providerResponse.ok ? 502 : providerResponse.status, { "Content-Type": "text/plain" });
+      response.end("Logo not available");
+      return;
+    }
+    const buffer = Buffer.from(await providerResponse.arrayBuffer());
+    response.writeHead(200, {
+      "Content-Type": contentType,
+      "Cache-Control": "public, max-age=604800, immutable",
+    });
+    response.end(buffer);
+  } catch (error) {
+    response.writeHead(502, { "Content-Type": "text/plain" });
+    response.end(error.message || "Failed to fetch logo");
+  }
+}
+
 function getPublicConfig(response) {
   sendJson(response, 200, {
     hasContract: Boolean(process.env.GENLAYER_CONTRACT_ADDRESS),
@@ -144,6 +180,10 @@ createServer(async (request, response) => {
   try {
     if (request.url?.startsWith("/api/sofascore-live")) {
       await proxySofaScore(response);
+      return;
+    }
+    if (request.url?.startsWith("/api/team-logo")) {
+      await proxyTeamLogo(request, response);
       return;
     }
     if (request.url?.startsWith("/api/config")) {

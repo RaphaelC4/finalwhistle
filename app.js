@@ -413,12 +413,13 @@ function normalizeSofaScoreMatch(raw, index) {
     awayTeam,
     homeScore,
     awayScore,
-    // SofaScore's own image CDN (api.sofascore.com/api/v1/team/{id}/image)
-    // returns 403 when hotlinked from outside sofascore.com — confirmed via
-    // console errors during testing, not a guess. Rather than show a broken
-    // image icon for every match, use the generated initials badge directly.
-    homeLogo: makeBadge(homeTeam),
-    awayLogo: makeBadge(awayTeam),
+    // Routed through our own server-side proxy (netlify/functions/team-logo.js)
+    // instead of hotlinking api.sofascore.com directly — that CDN 403s on
+    // cross-origin browser requests, but works fine server-to-server. The
+    // onerror handler in setImage()/market-list still falls back to
+    // makeBadge() if a given team has no id or the proxy itself 404s.
+    homeLogo: raw.homeTeam?.id ? `/api/team-logo?teamId=${raw.homeTeam.id}` : makeBadge(homeTeam),
+    awayLogo: raw.awayTeam?.id ? `/api/team-logo?teamId=${raw.awayTeam.id}` : makeBadge(awayTeam),
     odds: [],
   };
   const probability = inferProbability(match, index);

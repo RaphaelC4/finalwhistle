@@ -9,6 +9,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/team-logo"
+  to = "/.netlify/functions/team-logo"
+  status = 200
+
+[[redirects]]
   from = "/api/config"
   to = "/.netlify/functions/config"
   status = 200
