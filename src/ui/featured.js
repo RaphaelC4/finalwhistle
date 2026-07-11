@@ -1,0 +1,63 @@
+import { appState } from "../state.js";
+import { $, todayISO, jitter, setBar, setImage } from "../utils.js";
+
+export function buildSignals(match, home, draw, away) {
+  const gap = Math.abs(home - away);
+  const favorite = home >= away ? match.homeTeam : match.awayTeam;
+  const isLive = /live/i.test(match.status || "");
+
+  return [
+    ["Model lean", `${favorite} favored by ${gap} pts`, `${Math.max(home, away)}%`],
+    ["Draw risk", draw >= 30 ? "Elevated — tight matchup" : "Low — clear favorite", `${draw}%`],
+    ["Match state", isLive ? match.status.replace(/^Live\s*-?\s*/i, "") || "In play" : match.status || "Scheduled", isLive ? "Live" : "—"],
+  ];
+}
+
+function describeGap(gap) {
+  if (gap >= 30) return "strongly favors";
+  if (gap >= 12) return "leans toward";
+  return "sees a close call, tilting slightly toward";
+}
+
+export function buildAiRead(match, home, draw, away) {
+  const top = Math.max(home, draw, away);
+  const isLive = /live/i.test(match.status || "");
+  const scoreKnown = isLive && match.homeScore !== "-" && match.homeScore !== undefined && match.homeScore !== null;
+  const scoreNote = scoreKnown ? ` at ${match.homeScore}-${match.awayScore}` : "";
+
+  if (top === draw && draw >= home && draw >= away) {
+    return `Model rates the draw most likely (${draw}%) between ${match.homeTeam} and ${match.awayTeam}${scoreNote}.`;
+  }
+
+  const homeLeads = home >= away;
+  const leader = homeLeads ? match.homeTeam : match.awayTeam;
+  const trailer = homeLeads ? match.awayTeam : match.homeTeam;
+  const leadProb = homeLeads ? home : away;
+  const gap = Math.abs(home - away);
+
+  return `Model ${describeGap(gap)} ${leader} over ${trailer}${scoreNote}, at ${leadProb}% win probability.`;
+}
+
+export function setConditionFromMatch(match) {
+  if (!match) return;
+  $("#bet-condition").value = `${match.homeTeam} will beat ${match.awayTeam} by full time.`;
+  appState.conditionTouched = false;
+}
+
+export function setFeaturedMatch(match) {
+  $("#featured-league").textContent = match.league;
+  $("#featured-title").textContent = match.title;
+  $("#featured-status").textContent = match.status || "Today";
+  $("#home-team-name").textContent = match.homeTeam;
+  $("#away-team-name").textContent = match.awayTeam;
+  $("#home-score").textContent = match.homeScore ?? "-";
+  $("#away-score").textContent = match.awayScore ?? "-";
+  setImage("#home-logo", match.homeLogo, `${match.homeTeam} logo`);
+  setImage("#away-logo", match.awayLogo, `${match.awayTeam} logo`);
+  if (!appState.conditionTouched) {
+    setConditionFromMatch(match);
+  }
+  if (!appState.dateTouched) {
+    $("#match-date").value = match.matchDate || todayISO();
+  }
+}
