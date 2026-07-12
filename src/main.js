@@ -4,7 +4,7 @@ import { chainMap, networkLabels } from "./config.js";
 import { loadSofaScoreMatches } from "./feeds/sofascore.js";
 import { loadSportSrcMatches, prestigeScore, buildEliteMatchList } from "./feeds/sportsrc.js";
 import { connectWallet, setWalletConnected, ensureWalletChain } from "./genlayer/wallet.js";
-import { setFeaturedMatch, setConditionFromMatch, buildAiRead } from "./ui/featured.js";
+import { setFeaturedMatch, setConditionFromMatch, buildAiRead, renderConditionChips } from "./ui/featured.js";
 import { renderSignals } from "./ui/signals.js";
 import { renderOddsBoard } from "./ui/odds.js";
 import { renderMarkets } from "./ui/markets.js";
@@ -47,6 +47,7 @@ function refreshFeatured() {
 
 function handleSelectMatch() {
   refreshFeatured();
+  if (matches[0]) renderConditionChips(matches[0]);
 }
 
 async function loadLiveMatches() {
@@ -60,6 +61,7 @@ async function loadLiveMatches() {
     renderMarkets(handleSelectMatch);
     renderTicker(live, handleSelectMatch);
     refreshFeatured();
+    if (live[0]) renderConditionChips(live[0]);
     const eliteCount = live.filter((m) => prestigeScore(m) > 0).length;
     status.textContent = `SofaScore live: ${live.length} matches in play, ${eliteCount} elite`;
   } catch (error) {
@@ -72,6 +74,7 @@ async function loadLiveMatches() {
       renderMarkets(handleSelectMatch);
       renderTicker(live, handleSelectMatch);
       refreshFeatured();
+      if (live[0]) renderConditionChips(live[0]);
       const eliteCount = todayMatches.filter((m) => prestigeScore(m) > 0).length;
       status.textContent = rateLimited
         ? `SofaScore quota reached -- SportSRC fallback: ${live.length} matches, ${eliteCount} elite (schedule only)`
@@ -224,9 +227,6 @@ $("#connect-wallet").addEventListener("click", connectWallet);
 $("#refresh-featured").addEventListener("click", refreshFeatured);
 $("#refresh-live-matches").addEventListener("click", loadLiveMatches);
 $("#clear-bet-history").addEventListener("click", clearBetHistory);
-$("#bet-condition").addEventListener("input", () => {
-  appState.conditionTouched = true;
-});
 $("#match-date").addEventListener("input", () => {
   appState.dateTouched = true;
 });
@@ -234,6 +234,7 @@ $("#reset-condition").addEventListener("click", () => {
   const match = matches[0];
   if (match) {
     setConditionFromMatch(match);
+    renderConditionChips(match);
     appState.dateTouched = false;
     $("#match-date").value = match.matchDate || todayISO();
   }
