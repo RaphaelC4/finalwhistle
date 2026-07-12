@@ -1,5 +1,5 @@
-import { todayISO, makeBadge, findValue } from "../utils.js";
-import { prestigeTerms } from "../config.js";
+import { todayISO, makeBadge, findValue, fetchTheSportsDBBadge } from "../utils.js";
+import { prestigeTerms, teamLogoMap } from "../config.js";
 
 function inferProbability(match, index) {
   const homeScore = Number(match.homeScore);
@@ -49,10 +49,12 @@ export function normalizeSportSrcMatch(raw, index) {
   const homeScore = "-";
   const awayScore = "-";
   const homeLogo =
+    teamLogoMap[homeTeam] ||
     raw.teams?.home?.badge ||
     findValue(raw, ["home_badge", "home_logo", "homeLogo", "strHomeTeamBadge"]) ||
     makeBadge(homeTeam);
   const awayLogo =
+    teamLogoMap[awayTeam] ||
     raw.teams?.away?.badge ||
     findValue(raw, ["away_badge", "away_logo", "awayLogo", "strAwayTeamBadge"]) ||
     makeBadge(awayTeam);
@@ -83,6 +85,30 @@ export function normalizeSportSrcMatch(raw, index) {
   };
 }
 
+async function enrichWithSportsDBBadges(matches) {
+  const teamsToFetch = new Set();
+  for (const match of matches) {
+    if (!teamLogoMap[match.homeTeam]) teamsToFetch.add(match.homeTeam);
+    if (!teamLogoMap[match.awayTeam]) teamsToFetch.add(match.awayTeam);
+  }
+  const fetchPromises = [...teamsToFetch].map(async (teamName) => {
+    const badge = await fetchTheSportsDBBadge(teamName);
+    return { teamName, badge };
+  });
+  const results = await Promise.allSettled(fetchPromises);
+  const badgeMap = new Map();
+  for (const result of results) {
+    if (result.status === "fulfilled" && result.value.badge) {
+      badgeMap.set(result.value.teamName, result.value.badge);
+    }
+  }
+  for (const match of matches) {
+    if (badgeMap.has(match.homeTeam)) match.homeLogo = badgeMap.get(match.homeTeam);
+    if (badgeMap.has(match.awayTeam)) match.awayLogo = badgeMap.get(match.awayTeam);
+  }
+  return matches;
+}
+
 export async function loadSportSrcMatches() {
   const response = await fetch("https://api.sportsrc.org/?data=matches&category=football", {
     cache: "no-store",
@@ -100,5 +126,6 @@ export async function loadSportSrcMatches() {
     return new Date(match.kickoffTime).toISOString().slice(0, 10) === today;
   });
   if (!todayMatches.length) throw new Error("No matches returned for today");
+  await enrichWithSportsDBBadges(todayMatches);
   return todayMatches;
 }

@@ -2,6 +2,10 @@ import { matches, setMatches } from "../state.js";
 import { $, makeBadge } from "../utils.js";
 import { setConditionFromMatch } from "./featured.js";
 
+function fallbackBadge(name, colors) {
+  return makeBadge(name, colors);
+}
+
 export function renderMarkets(onSelectMatch) {
   if (!matches.length) {
     $("#market-list").innerHTML = `<div class="empty-state">No live matches found. Check your API configuration and refresh.</div>`;
@@ -10,14 +14,17 @@ export function renderMarkets(onSelectMatch) {
 
   $("#market-list").innerHTML = matches
     .map(
-      (match, index) => `
+      (match, index) => {
+        const homeFallback = fallbackBadge(match.homeTeam, match.homeColors);
+        const awayFallback = fallbackBadge(match.awayTeam, match.awayColors);
+        return `
         <div class="market-row">
           <div>
             <span class="market-title">
               <span class="market-team">
-                ${match.homeLogo ? `<img class="market-logo" src="${match.homeLogo}" alt="${match.homeTeam} logo" onerror="this.onerror=null;this.src='${makeBadge(match.homeTeam)}'" />` : ""}
+                ${match.homeLogo ? `<img class="market-logo" src="${match.homeLogo}" alt="${match.homeTeam} logo" onerror="this.onerror=null;this.src='${homeFallback}'" />` : ""}
                 ${match.title}
-                ${match.awayLogo ? `<img class="market-logo" src="${match.awayLogo}" alt="${match.awayTeam} logo" onerror="this.onerror=null;this.src='${makeBadge(match.awayTeam)}'" />` : ""}
+                ${match.awayLogo ? `<img class="market-logo" src="${match.awayLogo}" alt="${match.awayTeam} logo" onerror="this.onerror=null;this.src='${awayFallback}'" />` : ""}
               </span>
             </span>
             <span class="market-meta">${match.league} - ${match.meta}</span>
@@ -27,7 +34,8 @@ export function renderMarkets(onSelectMatch) {
           </div>
           <button class="secondary-button compact-button select-market" data-index="${index}">Use Match</button>
         </div>
-      `
+      `;
+      }
     )
     .join("");
 

@@ -52,8 +52,8 @@ export function setFeaturedMatch(match) {
   $("#away-team-name").textContent = match.awayTeam;
   $("#home-score").textContent = match.homeScore ?? "-";
   $("#away-score").textContent = match.awayScore ?? "-";
-  setImage("#home-logo", match.homeLogo, `${match.homeTeam} logo`);
-  setImage("#away-logo", match.awayLogo, `${match.awayTeam} logo`);
+  setImage("#home-logo", match.homeLogo, `${match.homeTeam} logo`, match.homeColors);
+  setImage("#away-logo", match.awayLogo, `${match.awayTeam} logo`, match.awayColors);
   if (!appState.conditionTouched) {
     setConditionFromMatch(match);
   }

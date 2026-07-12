@@ -1,8 +1,8 @@
-.env
 node_modules/
 dist/
-vite.out.log
-vite.err.log
+.env
+.env.local
+*.log
 desktop.ini
 server.err.log
 server.out.log

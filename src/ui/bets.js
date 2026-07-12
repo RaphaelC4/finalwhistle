@@ -4,6 +4,8 @@ import { writeContractUpdateMarket, writeContractResolve, readContractMarket } f
 import { connectWallet } from "../genlayer/wallet.js";
 import { networkLabels } from "../config.js";
 
+let activeFilter = "all";
+
 function verdictLabel(status, verdict) {
   if (status === "pending") return "Pending";
   if (verdict === "true") return "Won";
@@ -11,16 +13,37 @@ function verdictLabel(status, verdict) {
   return "Unresolved";
 }
 
+export function setBetFilter(filter) {
+  activeFilter = filter;
+  renderBetHistory();
+}
+
 export function renderBetHistory() {
   const container = $("#bet-history-list");
-  if (!betHistory.length) {
-    container.innerHTML = `<div class="empty-state">No bets yet — submit one from the resolver above and it'll show up here.</div>`;
+  const filtered = activeFilter === "all"
+    ? betHistory
+    : betHistory.filter((bet) => {
+        if (activeFilter === "pending") return bet.status === "pending";
+        if (activeFilter === "resolved") return bet.status === "resolved";
+        return true;
+      });
+
+  if (!filtered.length) {
+    const emptyMsg = activeFilter === "pending"
+      ? "No pending bets. Submit one from the resolver and it will appear here."
+      : activeFilter === "resolved"
+        ? "No resolved bets yet. Resolve a pending bet to see the outcome here."
+        : "No bets yet. Submit one from the resolver above and it will show up here.";
+    container.innerHTML = `<div class="empty-state">${emptyMsg}</div>`;
     return;
   }
 
-  container.innerHTML = betHistory
+  container.innerHTML = filtered
     .map((bet) => {
       const badgeClass = bet.status === "pending" ? "pending" : bet.verdict || "unresolved";
+      const resolveBtn = bet.status === "pending"
+        ? `<button class="resolve-inline" data-bet-id="${bet.id}">Resolve</button>`
+        : "";
       return `
         <div class="bet-row">
           <div>
@@ -31,11 +54,22 @@ export function renderBetHistory() {
             <strong>${bet.stake} ${bet.asset}</strong>
             <span>${new Date(bet.timestamp).toLocaleDateString()}</span>
           </div>
+          ${resolveBtn}
           <span class="status-badge ${badgeClass}">${verdictLabel(bet.status, bet.verdict)}</span>
         </div>
       `;
     })
     .join("");
+
+  container.querySelectorAll(".resolve-inline").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const betId = btn.dataset.betId;
+      if (betId) {
+        appState.lastBetId = betId;
+        resolveBet();
+      }
+    });
+  });
 }
 
 export async function submitBet() {
@@ -66,8 +100,8 @@ export async function submitBet() {
   }
 
   $("#resolver-output").innerHTML = `
-    <span>Submitting to GenLayer…</span>
-    <strong>Sending update_market(). Waiting for validator consensus…</strong>
+    <span>Submitting to GenLayer...</span>
+    <strong>Sending update_market(). Waiting for validator consensus...</strong>
   `;
 
   try {
@@ -91,7 +125,7 @@ export async function submitBet() {
     });
 
     $("#resolver-output").innerHTML = `
-      <span>Bet submitted ✓</span>
+      <span>Bet submitted</span>
       <strong>update_market() accepted on ${networkLabels[$("#rpc-target").value] || "GenLayer"}.</strong>
       <div class="result-grid">
         <div class="result-chip"><span>Tx</span><strong>${shortAddress(txHash)}</strong></div>
@@ -125,7 +159,7 @@ export async function resolveBet() {
   }
 
   $("#resolver-output").innerHTML = `
-    <span>Resolving on GenLayer…</span>
+    <span>Resolving on GenLayer...</span>
     <strong>Calling resolve().</strong>
     <p>AI validators are reading live match data.</p>
   `;
@@ -147,7 +181,7 @@ export async function resolveBet() {
       market.verdict === "true" ? "#51e08b" : market.verdict === "false" ? "#ff6f61" : "#f6c85f";
 
     $("#resolver-output").innerHTML = `
-      <span>Resolution complete ✓</span>
+      <span>Resolution complete</span>
       <strong style="color:${verdictColor}">Verdict: ${market.verdict?.toUpperCase() ?? "UNRESOLVED"}</strong>
       <div class="result-grid">
         <div class="result-chip"><span>Score</span><strong>${market.final_score}</strong></div>

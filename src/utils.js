@@ -13,7 +13,7 @@ export function todayISO() {
   return `${year}-${month}-${day}`;
 }
 
-export function makeBadge(teamName) {
+export function makeBadge(teamName, colors) {
   const initials =
     teamName
       .split(/\s+/)
@@ -22,14 +22,15 @@ export function makeBadge(teamName) {
       .map((word) => word[0])
       .join("")
       .toUpperCase() || "FC";
+  const bg = colors?.primary || "#123f33";
+  const fg = colors?.text || "#51e08b";
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80">
-      <circle cx="40" cy="40" r="36" fill="#eef8f1"/>
-      <circle cx="40" cy="40" r="30" fill="#123f33"/>
-      <text x="40" y="47" text-anchor="middle" font-family="Arial" font-size="22" font-weight="800" fill="#51e08b">${initials}</text>
+      <circle cx="40" cy="40" r="36" fill="${bg}"/>
+      <text x="40" y="48" text-anchor="middle" font-family="Arial,sans-serif" font-size="22" font-weight="800" fill="${fg}">${initials}</text>
     </svg>
   `;
-  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg.trim())}`;
 }
 
 export function findValue(object, keys) {
@@ -41,15 +42,16 @@ export function findValue(object, keys) {
   return "";
 }
 
-export function setImage(selector, src, alt) {
+export function setImage(selector, src, alt, colors) {
   const image = $(selector);
   if (!image) return;
   image.alt = alt;
+  const fallback = makeBadge(alt, colors);
   image.onerror = () => {
     image.onerror = null;
-    image.src = makeBadge(alt);
+    image.src = fallback;
   };
-  image.src = src || makeBadge(alt);
+  image.src = src || fallback;
 }
 
 export function setBar(id, value) {
@@ -64,4 +66,22 @@ export function jitter(value, amount = 5) {
 export function buildSourceUrl(match, isoDateOverride) {
   const isoDate = isoDateOverride || match.matchDate || todayISO();
   return `https://www.bbc.com/sport/football/scores-fixtures/${isoDate}`;
+}
+
+const sportsdBadgeCache = new Map();
+
+export async function fetchTheSportsDBBadge(teamName) {
+  if (sportsdBadgeCache.has(teamName)) return sportsdBadgeCache.get(teamName);
+  try {
+    const res = await fetch(
+      `https://www.thesportsdb.com/api/v1/json/3/searchteams.php?t=${encodeURIComponent(teamName)}`
+    );
+    const data = await res.json();
+    const badge = data.teams?.[0]?.strBadge || null;
+    sportsdBadgeCache.set(teamName, badge);
+    return badge;
+  } catch {
+    sportsdBadgeCache.set(teamName, null);
+    return null;
+  }
 }

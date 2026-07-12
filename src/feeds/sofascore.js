@@ -1,4 +1,5 @@
-import { todayISO, makeBadge, findValue } from "../utils.js";
+import { todayISO, makeBadge, findValue, fetchTheSportsDBBadge } from "../utils.js";
+import { teamLogoMap } from "../config.js";
 
 function inferProbability(match, index) {
   const homeScore = Number(match.homeScore);
@@ -12,7 +13,12 @@ function inferProbability(match, index) {
   return { home: 42 + seed, draw: 25, away: 33 - Math.min(seed, 12) };
 }
 
-export function normalizeSofaScoreMatch(raw, index) {
+function resolveLogoSync(teamName, teamColors) {
+  if (teamLogoMap[teamName]) return teamLogoMap[teamName];
+  return makeBadge(teamName, teamColors);
+}
+
+function normalizeSofaScoreMatch(raw, index) {
   const homeTeam = raw.homeTeam?.name || raw.homeTeam?.shortName || "Home";
   const awayTeam = raw.awayTeam?.name || raw.awayTeam?.shortName || "Away";
   const statusType = raw.status?.type || "notstarted";
@@ -26,6 +32,8 @@ export function normalizeSofaScoreMatch(raw, index) {
       : statusType === "notstarted"
       ? "Scheduled"
       : raw.status?.description || "Live";
+  const homeColors = raw.homeTeam?.teamColors || null;
+  const awayColors = raw.awayTeam?.teamColors || null;
   const match = {
     eventId: raw.id,
     title: `${homeTeam} vs ${awayTeam}`,
@@ -39,8 +47,10 @@ export function normalizeSofaScoreMatch(raw, index) {
     awayTeam,
     homeScore,
     awayScore,
-    homeLogo: raw.homeTeam?.id ? `/api/team-logo?teamId=${raw.homeTeam.id}` : makeBadge(homeTeam),
-    awayLogo: raw.awayTeam?.id ? `/api/team-logo?teamId=${raw.awayTeam.id}` : makeBadge(awayTeam),
+    homeColors,
+    awayColors,
+    homeLogo: resolveLogoSync(homeTeam, homeColors),
+    awayLogo: resolveLogoSync(awayTeam, awayColors),
     odds: [],
   };
   const probability = inferProbability(match, index);
@@ -49,6 +59,34 @@ export function normalizeSofaScoreMatch(raw, index) {
     ...probability,
     odds: [`Home ${probability.home}%`, `Draw ${probability.draw}%`, `Away ${probability.away}%`],
   };
+}
+
+async function enrichWithSportsDBBadges(matches) {
+  const teamsToFetch = new Set();
+  for (const match of matches) {
+    if (!teamLogoMap[match.homeTeam]) teamsToFetch.add(match.homeTeam);
+    if (!teamLogoMap[match.awayTeam]) teamsToFetch.add(match.awayTeam);
+  }
+
+  const fetchPromises = [...teamsToFetch].map(async (teamName) => {
+    const badge = await fetchTheSportsDBBadge(teamName);
+    return { teamName, badge };
+  });
+
+  const results = await Promise.allSettled(fetchPromises);
+  const badgeMap = new Map();
+  for (const result of results) {
+    if (result.status === "fulfilled" && result.value.badge) {
+      badgeMap.set(result.value.teamName, result.value.badge);
+    }
+  }
+
+  for (const match of matches) {
+    if (badgeMap.has(match.homeTeam)) match.homeLogo = badgeMap.get(match.homeTeam);
+    if (badgeMap.has(match.awayTeam)) match.awayLogo = badgeMap.get(match.awayTeam);
+  }
+
+  return matches;
 }
 
 export async function loadSofaScoreMatches() {
@@ -63,5 +101,6 @@ export async function loadSofaScoreMatches() {
   if (!Array.isArray(list) || !list.length) throw new Error("SofaScore returned no live events right now");
   const normalized = list.map(normalizeSofaScoreMatch).filter((m) => m.homeTeam && m.awayTeam);
   if (!normalized.length) throw new Error("SofaScore returned no usable events");
+  await enrichWithSportsDBBadges(normalized);
   return normalized;
 }

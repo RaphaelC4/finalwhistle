@@ -8,8 +8,9 @@ import { setFeaturedMatch, setConditionFromMatch, buildAiRead } from "./ui/featu
 import { renderSignals } from "./ui/signals.js";
 import { renderOddsBoard } from "./ui/odds.js";
 import { renderMarkets } from "./ui/markets.js";
-import { renderBetHistory, submitBet, resolveBet } from "./ui/bets.js";
+import { renderBetHistory, submitBet, resolveBet, setBetFilter } from "./ui/bets.js";
 import { renderLeaderboard } from "./ui/leaderboard.js";
+import { renderTicker, updateTickerScores } from "./ui/ticker.js";
 
 function updateClock() {
   $("#clock").textContent = new Date().toLocaleTimeString([], {
@@ -57,6 +58,7 @@ async function loadLiveMatches() {
     setMatches(live);
     appState.liveFeed = "sofascore";
     renderMarkets(handleSelectMatch);
+    renderTicker(live, handleSelectMatch);
     refreshFeatured();
     const eliteCount = live.filter((m) => prestigeScore(m) > 0).length;
     status.textContent = `SofaScore live: ${live.length} matches in play, ${eliteCount} elite`;
@@ -68,23 +70,25 @@ async function loadLiveMatches() {
       setMatches(live);
       appState.liveFeed = "sportsrc";
       renderMarkets(handleSelectMatch);
+      renderTicker(live, handleSelectMatch);
       refreshFeatured();
       const eliteCount = todayMatches.filter((m) => prestigeScore(m) > 0).length;
       status.textContent = rateLimited
-        ? `SofaScore quota reached — SportSRC fallback: ${live.length} matches, ${eliteCount} elite (schedule only)`
+        ? `SofaScore quota reached -- SportSRC fallback: ${live.length} matches, ${eliteCount} elite (schedule only)`
         : `SportSRC: ${live.length} matches today, ${eliteCount} elite (schedule only, no live scores)`;
     } catch {
       setMatches([]);
       appState.liveFeed = "idle";
       renderMarkets(handleSelectMatch);
+      renderTicker([], handleSelectMatch);
       status.textContent = rateLimited
-        ? "SofaScore quota reached and fallback unavailable — try again later"
-        : "Live feed unavailable — check server/API configuration";
+        ? "SofaScore quota reached and fallback unavailable -- try again later"
+        : "Live feed unavailable -- check server/API configuration";
     }
   }
 }
 
-// ─── Tab switching ──────────────────────────────────────────────────────────
+// --- Tab switching ---
 const tabSections = {
   predictions: ["#predictions"],
   resolver: ["#resolver"],
@@ -114,7 +118,90 @@ function switchTab(tabName) {
   });
 }
 
-// ─── Boot ──────────────────────────────────────────────────────────────────
+// --- GSAP scroll animations ---
+function initScrollAnimations() {
+  if (typeof gsap === "undefined" || typeof ScrollTrigger === "undefined") return;
+
+  gsap.registerPlugin(ScrollTrigger);
+
+  gsap.utils.toArray(".market-row").forEach((row, i) => {
+    gsap.from(row, {
+      scrollTrigger: {
+        trigger: row,
+        start: "top 92%",
+        toggleActions: "play none none none",
+      },
+      opacity: 0,
+      y: 20,
+      duration: 0.5,
+      delay: i * 0.06,
+      ease: "power2.out",
+    });
+  });
+
+  gsap.utils.toArray(".signal-item").forEach((item, i) => {
+    gsap.from(item, {
+      scrollTrigger: {
+        trigger: item,
+        start: "top 94%",
+        toggleActions: "play none none none",
+      },
+      opacity: 0,
+      x: -16,
+      duration: 0.45,
+      delay: i * 0.08,
+      ease: "power2.out",
+    });
+  });
+
+  gsap.utils.toArray(".leaderboard-row").forEach((row, i) => {
+    gsap.from(row, {
+      scrollTrigger: {
+        trigger: row,
+        start: "top 94%",
+        toggleActions: "play none none none",
+      },
+      opacity: 0,
+      y: 14,
+      duration: 0.4,
+      delay: i * 0.07,
+      ease: "power2.out",
+    });
+  });
+
+  const featured = document.querySelector(".featured-match");
+  if (featured) {
+    gsap.from(featured, {
+      scrollTrigger: {
+        trigger: featured,
+        start: "top 88%",
+        toggleActions: "play none none none",
+      },
+      opacity: 0,
+      y: 30,
+      duration: 0.7,
+      ease: "power3.out",
+    });
+  }
+
+  const resolver = document.querySelector(".bet-slip");
+  if (resolver) {
+    gsap.from(resolver, {
+      scrollTrigger: {
+        trigger: resolver,
+        start: "top 88%",
+        toggleActions: "play none none none",
+      },
+      opacity: 0,
+      y: 30,
+      duration: 0.7,
+      delay: 0.15,
+      ease: "power3.out",
+    });
+  }
+}
+
+// --- Boot ---
 setOnBetHistoryChange(() => {
   renderBetHistory();
   renderLeaderboard();
@@ -130,7 +217,9 @@ loadLiveMatches();
 setInterval(updateClock, 1000);
 setInterval(refreshFeatured, 9_000);
 setInterval(loadLiveMatches, 60_000);
+setInterval(() => updateTickerScores(matches), 15_000);
 
+// --- Event listeners ---
 $("#connect-wallet").addEventListener("click", connectWallet);
 $("#refresh-featured").addEventListener("click", refreshFeatured);
 $("#refresh-live-matches").addEventListener("click", loadLiveMatches);
@@ -158,13 +247,23 @@ $("#rpc-target").addEventListener("change", () => {
     ensureWalletChain(chain).catch((chainError) => {
       $("#resolver-output").innerHTML = `
         <span>Wrong network in wallet</span>
-        <strong>Couldn't switch your wallet to ${chain.name}.</strong>
+        <strong>Could not switch your wallet to ${chain.name}.</strong>
         <p>${chainError.message || "Approve the network switch/add prompt to enable signing."}</p>
       `;
     });
   }
 });
 
+// Bet history tab filtering
+document.querySelectorAll(".bet-tabs .segmented button").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".bet-tabs .segmented button").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    setBetFilter(btn.dataset.filter);
+  });
+});
+
+// Nav tab switching
 document.querySelectorAll(".nav-item").forEach((item) => {
   item.addEventListener("click", (e) => {
     e.preventDefault();
@@ -173,6 +272,7 @@ document.querySelectorAll(".nav-item").forEach((item) => {
   });
 });
 
+// Wallet auto-detect
 if (window.ethereum) {
   window.ethereum
     .request({ method: "eth_accounts" })
@@ -183,3 +283,6 @@ if (window.ethereum) {
 } else {
   $("#wallet-status").textContent = "No browser wallet detected";
 }
+
+// Initialize GSAP after a short delay to ensure DOM is ready
+setTimeout(initScrollAnimations, 300);
