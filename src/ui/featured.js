@@ -31,6 +31,7 @@ function setActiveChip(type) {
 }
 
 let currentMatchRef = null;
+let settingCondition = false;
 
 export function renderConditionChips(match) {
   currentMatchRef = match;
@@ -59,11 +60,14 @@ export function renderConditionChips(match) {
   textarea.addEventListener("input", onTextareaInput);
 
   if (textarea && !appState.conditionTouched) {
+    settingCondition = true;
     textarea.value = buildConditionText("home-win", match);
+    settingCondition = false;
   }
 }
 
 function onTextareaInput() {
+  if (settingCondition) return;
   appState.conditionTouched = true;
   const container = $("#condition-chips");
   if (!container) return;
@@ -113,7 +117,9 @@ export function buildAiRead(match, home, draw, away) {
 export function setConditionFromMatch(match) {
   if (!match) return;
   const textarea = $("#bet-condition");
+  settingCondition = true;
   textarea.value = `${match.homeTeam} will beat ${match.awayTeam} by full time.`;
+  settingCondition = false;
   appState.conditionTouched = false;
 }
 
