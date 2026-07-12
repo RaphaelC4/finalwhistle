@@ -57,6 +57,10 @@ export function renderConditionChips(match) {
   const textarea = $("#bet-condition");
   textarea.removeEventListener("input", onTextareaInput);
   textarea.addEventListener("input", onTextareaInput);
+
+  if (textarea && !appState.conditionTouched) {
+    textarea.value = buildConditionText("home-win", match);
+  }
 }
 
 function onTextareaInput() {
@@ -111,7 +115,6 @@ export function setConditionFromMatch(match) {
   const textarea = $("#bet-condition");
   textarea.value = `${match.homeTeam} will beat ${match.awayTeam} by full time.`;
   appState.conditionTouched = false;
-  setActiveChip("home-win");
 }
 
 export function setFeaturedMatch(match) {
