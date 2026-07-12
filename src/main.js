@@ -48,6 +48,7 @@ function refreshFeatured() {
 function handleSelectMatch() {
   if (matches[0]) renderConditionChips(matches[0]);
   refreshFeatured();
+  appState.conditionTouched = true;
 }
 
 async function loadLiveMatches() {
