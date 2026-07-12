@@ -1,4 +1,4 @@
-import { appState, matches, betHistory, getConfiguredContractAddress, addBetRecord, updateLastBetRecord } from "../state.js";
+import { appState, matches, betHistory, getConfiguredContractAddress, addBetRecord, updateBetRecord, updateLastBetRecord } from "../state.js";
 import { $, shortAddress } from "../utils.js";
 import { writeContractUpdateMarket, writeContractResolve, readContractMarket } from "../genlayer/client.js";
 import { connectWallet } from "../genlayer/wallet.js";
@@ -111,18 +111,25 @@ export async function submitBet() {
     const { txHash } = await writeContractUpdateMarket(contract, match, condition);
     appState.lastTx = txHash;
 
-    const market = await readContractMarket(contract);
-
     addBetRecord({
       id: txHash,
       matchTitle: match.title,
-      condition: market.condition || condition,
+      condition,
       stake,
       asset,
       status: "pending",
       verdict: null,
       timestamp: Date.now(),
     });
+
+    let displayCondition = condition;
+    try {
+      const market = await readContractMarket(contract);
+      displayCondition = market.condition || condition;
+      updateBetRecord(txHash, { condition: market.condition || condition });
+    } catch {
+      // readContractMarket failed — bet saved with raw condition text
+    }
 
     $("#resolver-output").innerHTML = `
       <span>Bet submitted</span>
@@ -131,7 +138,7 @@ export async function submitBet() {
         <div class="result-chip"><span>Tx</span><strong>${shortAddress(txHash)}</strong></div>
         <div class="result-chip"><span>Stake</span><strong>${stake} ${asset}</strong></div>
         <div class="result-chip"><span>Contract</span><strong>Configured</strong></div>
-        <div class="result-chip"><span>Condition</span><strong>${market.condition || condition}</strong></div>
+        <div class="result-chip"><span>Condition</span><strong>${displayCondition}</strong></div>
       </div>
     `;
   } catch (error) {

@@ -54,7 +54,12 @@ export function addBetRecord(record) {
 
 export function updateLastBetRecord(patch) {
   if (!appState.lastBetId) return;
-  betHistory = betHistory.map((bet) => (bet.id === appState.lastBetId ? { ...bet, ...patch } : bet));
+  updateBetRecord(appState.lastBetId, patch);
+}
+
+export function updateBetRecord(id, patch) {
+  if (!id) return;
+  betHistory = betHistory.map((bet) => (bet.id === id ? { ...bet, ...patch } : bet));
   saveBetHistory(betHistory);
   onBetHistoryChange();
 }
